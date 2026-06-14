@@ -439,8 +439,8 @@ function parseRows(rows) {
   const products = [];
 
   for (const row of rows) {
-    // 브랜드
-    const brand = (row['Brand'] || row['Designer'] || row['BRAND'] || '').toString().trim().toUpperCase();
+    // 브랜드 (Franz는 col2가 Brand)
+    const brand = (row['Brand'] || row['Designer'] || row['BRAND'] || row['brand'] || '').toString().trim().toUpperCase();
     if (!brand) continue;
 
     // 설명/SKU
@@ -448,23 +448,29 @@ function parseRows(rows) {
     const sku = row['Modello variante'] || row['SKU'] || row['Codice'] || row['LEAM CODE'] || row['Item Code'] || '';
     const color = row['Colore'] || row['Color'] || row['COLOR'] || '';
     const mat = row['Composizione'] || row['Composition'] || row['Materials'] || row['Soumission'] || '';
-    const madeIn = row['Made In'] || row['MADE IN'] || row['Paese di produzione'] || 'ITALY';
+    const madeIn = row['Made In'] || row['MADE IN'] || row['Paese di produzione'] || row['Paese'] || row['Country'] || 'ITALY';
 
     // 재고/수량
     let qty = 1;
-    for (const k of ['Quantità', 'Qty', 'Stock', 'Quantity', 'Available']) {
-      if (row[k] !== undefined && row[k] !== '') {
+    for (const k of ['Quantità', 'Disponibilita', 'Qty', 'Stock', 'Quantity', 'Available', 'Disp.']) {
+      if (row[k] !== undefined && row[k] !== '' && row[k] !== null) {
         const q = parseInt(row[k]);
         if (!isNaN(q) && q > 0) { qty = q; break; }
       }
     }
 
-    // 가격
+    // 가격 파싱 (EUR 440, 440.00, €440 등 다양한 형식 지원)
+    function parsePrice(val) {
+      if (!val && val !== 0) return 0;
+      const p = parseFloat(String(val).replace(/[^0-9.]/g,''));
+      return isNaN(p) ? 0 : p;
+    }
     let wholesale = 0;
-    for (const k of ['Wholesale','WHOLESALE','Your Final Price inc. Discount and Tax Free','Prezzo vendita','Price','PRICE','Final Price','price_eur']) {
-      if (row[k] !== undefined && row[k] !== '') {
-        const p = parseFloat(String(row[k]).replace(/[€$£,\s]/g,''));
-        if (!isNaN(p) && p > 0) { wholesale = p; break; }
+    // Franz: Prezzo Riferimento 우선 (도매가)
+    for (const k of ['Prezzo Riferimento','Prezzo_Riferimento','WHOLESALE','Wholesale','Your Final Price inc. Discount and Tax Free','Prezzo vendita','Price','PRICE','Final Price','price_eur','Unit Price']) {
+      if (row[k] !== undefined && row[k] !== '' && row[k] !== null) {
+        const p = parsePrice(row[k]);
+        if (p > 0) { wholesale = p; break; }
       }
     }
     if (wholesale === 0) continue;
