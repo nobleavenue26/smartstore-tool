@@ -4,7 +4,240 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>런던루크 스마트스토어 자동화 v2</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+// ============================================================
+// 순수 JS CSV/XLSX 파서 & 생성기
+// ============================================================
+
+// CSV 파싱
+function parseCSV(text) {
+  const lines = text.split(/\r?\n/);
+  if (lines.length === 0) return [];
+  const headers = splitCSVLine(lines[0]);
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    const vals = splitCSVLine(lines[i]);
+    const obj = {};
+    headers.forEach((h, idx) => { obj[h.trim()] = (vals[idx] || '').trim(); });
+    rows.push(obj);
+  }
+  return rows;
+}
+
+function splitCSVLine(line) {
+  const result = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') { inQ = !inQ; }
+    else if (c === ',' && !inQ) { result.push(cur); cur = ''; }
+    else { cur += c; }
+  }
+  result.push(cur);
+  return result;
+}
+
+// XLSX 파싱 (간단 버전 - 헤더+데이터 읽기)
+function parseXLSX(arrayBuffer) {
+  // 바이너리를 텍스트로 변환 시도
+  try {
+    const uint8 = new Uint8Array(arrayBuffer);
+    // CSV 형식인지 체크
+    const text = new TextDecoder('utf-8').decode(uint8);
+    if (text.includes(',') || text.includes(';')) {
+      return parseCSV(text);
+    }
+  } catch(e) {}
+  return null;
+}
+
+// XLSX 생성 (XML 기반)
+function createXLSX(headers1, headers2, dataRows) {
+  const escXML = (s) => String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+
+  const allRows = [headers1, headers2, ...dataRows];
+  let rowsXML = '';
+
+  allRows.forEach((row, ri) => {
+    let cellsXML = '';
+    row.forEach((cell, ci) => {
+      const col = colName(ci);
+      const ref = col + (ri + 1);
+      if (cell === null || cell === undefined || cell === '') return;
+      if (typeof cell === 'number') {
+        cellsXML += `<c r="${ref}" t="n"><v>${cell}</v></c>`;
+      } else {
+        const val = escXML(String(cell));
+        cellsXML += `<c r="${ref}" t="inlineStr"><is><t>${val}</t></is></c>`;
+      }
+    });
+    rowsXML += `<row r="${ri+1}">${cellsXML}</row>`;
+  });
+
+  const sheet = `<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetData>${rowsXML}</sheetData>
+</worksheet>`;
+
+  const workbook = `<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="일괄등록" sheetId="1" r:id="rId1"/></sheets>
+</workbook>`;
+
+  const rels = `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`;
+
+  const contentTypes = `<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`;
+
+  const appRels = `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`;
+
+  return { sheet, workbook, rels, contentTypes, appRels };
+}
+
+function colName(idx) {
+  let s = '';
+  idx++;
+  while (idx > 0) {
+    let r = (idx - 1) % 26;
+    s = String.fromCharCode(65 + r) + s;
+    idx = Math.floor((idx - 1) / 26);
+  }
+  return s;
+}
+
+// ZIP 생성 (순수 JS)
+function makeZip(files) {
+  // 간단한 ZIP 구현
+  const parts = [];
+  const centralDir = [];
+  let offset = 0;
+
+  function crc32(data) {
+    const table = [];
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) {
+        c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+      }
+      table[n] = c;
+    }
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < data.length; i++) {
+      crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
+    }
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+
+  function str2bytes(str) {
+    return new TextEncoder().encode(str);
+  }
+
+  function uint32le(n) {
+    return [n & 0xFF, (n >> 8) & 0xFF, (n >> 16) & 0xFF, (n >> 24) & 0xFF];
+  }
+  function uint16le(n) {
+    return [n & 0xFF, (n >> 8) & 0xFF];
+  }
+
+  for (const [name, content] of Object.entries(files)) {
+    const nameBytes = str2bytes(name);
+    const dataBytes = str2bytes(content);
+    const crc = crc32(dataBytes);
+    const size = dataBytes.length;
+    const localHeader = [
+      0x50,0x4B,0x03,0x04, // signature
+      0x14,0x00,           // version
+      0x00,0x00,           // flags
+      0x00,0x00,           // compression (store)
+      0x00,0x00,           // mod time
+      0x00,0x00,           // mod date
+      ...uint32le(crc),
+      ...uint32le(size),
+      ...uint32le(size),
+      ...uint16le(nameBytes.length),
+      0x00,0x00,           // extra length
+      ...nameBytes,
+      ...dataBytes,
+    ];
+    centralDir.push({
+      name: nameBytes, nameLen: nameBytes.length,
+      crc, size, offset,
+    });
+    offset += localHeader.length;
+    parts.push(...localHeader);
+  }
+
+  const cdOffset = offset;
+  let cdSize = 0;
+  const cdParts = [];
+  for (const e of centralDir) {
+    const cd = [
+      0x50,0x4B,0x01,0x02,
+      0x14,0x00,0x14,0x00,
+      0x00,0x00,0x00,0x00,
+      0x00,0x00,0x00,0x00,
+      ...uint32le(e.crc),
+      ...uint32le(e.size),
+      ...uint32le(e.size),
+      ...uint16le(e.nameLen),
+      0x00,0x00,0x00,0x00,
+      0x00,0x00,0x00,0x00,
+      0x00,0x00,0x00,0x00,
+      ...uint32le(e.offset),
+      ...e.name,
+    ];
+    cdParts.push(...cd);
+    cdSize += cd.length;
+  }
+
+  const eocd = [
+    0x50,0x4B,0x05,0x06,
+    0x00,0x00,0x00,0x00,
+    ...uint16le(centralDir.length),
+    ...uint16le(centralDir.length),
+    ...uint32le(cdSize),
+    ...uint32le(cdOffset),
+    0x00,0x00,
+  ];
+
+  return new Uint8Array([...parts, ...cdParts, ...eocd]);
+}
+
+function downloadXLSX(headers1, headers2, dataRows, filename) {
+  const { sheet, workbook, rels, contentTypes, appRels } = createXLSX(headers1, headers2, dataRows);
+  const files = {
+    '[Content_Types].xml': contentTypes,
+    '_rels/.rels': appRels,
+    'xl/workbook.xml': workbook,
+    'xl/_rels/workbook.xml.rels': rels,
+    'xl/worksheets/sheet1.xml': sheet,
+  };
+  const zipData = makeZip(files);
+  const blob = new Blob([zipData], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; background: #F8F5F1; min-height: 100vh; padding: 20px 16px 60px; }
@@ -217,13 +450,22 @@ const FRANZ_FW26 = {
 
 const CATEGORY_MAP = {
   "숄더백":50000639,"토트백":50000640,"크로스백":50000641,
-  "클러치":50000643,"파우치":50000643,"백팩":50000644,
-  "지갑":50003984,"카드지갑":50003984,
-  "스니커즈":50003822,"로퍼":50000387,"샌들":50000389,
-  "플랫":50000387,"뮬":50000389,"부츠":50000386,
-  "여성상의":50000251,"여성하의":50000252,"원피스":50000253,
-  "남성상의":50000830,"남성하의":50000831,
-  "키즈상의":50001379,"벨트":50000539,"선글라스":50001298,
+  "클러치백":50000642,"클러치":50000642,"파우치":50000643,
+  "여성백팩":50000644,"백팩":50000644,"에코백":50015340,
+  "힙색":50000645,
+  "남성숄더백":50000646,"남성토트백":50000647,"남성크로스백":50000648,
+  "남성클러치":50000649,"남성백팩":50000651,
+  "여성반지갑":50003982,"여성장지갑":50003984,"여성중지갑":50003983,
+  "지갑":50003984,"카드지갑":50000662,"남성반지갑":50003985,"남성장지갑":50003987,
+  "여성벨트":50000539,"벨트":50000539,"남성벨트":50003988,
+  "선글라스":50000554,
+  "스니커즈":50003822,"운동화":50003822,
+  "샌들":50000389,"뮬":50000389,"로퍼":50000387,"플랫":50000387,
+  "힐":50000388,"부츠":50000386,
+  "여성상의":50000251,"여성하의":50000252,"원피스":50000253,"여성아우터":50000254,
+  "남성상의":50000830,"남성하의":50000831,"남성아우터":50000832,
+  "키즈상의":50001379,"키즈하의":50001380,"키즈아우터":50001381,
+  "스카프":50004010,"머플러":50000565,
 };
 
 const ORIGIN_MAP = {
@@ -238,25 +480,58 @@ const ORIGIN_MAP = {
 
 const TAG_MAP = {
   "숄더백":"여자친구가방선물, 젤리백, 인트레치아토, 여성숄더백, 미니숄더백, 미니토트백, 가죽숄더백, 버킷백, 여름가방, 호보백",
-  "토트백":"토트백, 라탄백, 바오바오백, 라피아백, 위빙토트백, 가죽토트백, 여름토트백, 여성가방추천, 명품가방, 여성토트백",
+  "토트백":"토트백, 라탄백, 바오바오백, 라피아백, 분크가방, 드래곤디퓨전, 더로우가방, 위빙토트백, 가죽토트백, 여름토트백",
   "크로스백":"크로스백, 미니크로스백, 여성크로스백, 위빙백, 가죽크로스백, 미니백, 명품가방, 체인크로스백, 인트레치아토크로스백, 여성미니백",
+  "클러치백":"여성숄더백가방, 미니파우치백, 미니토트백, 여자친구선물, 명품가방, 미니크로스백, 명품클러치백, 파우치클러치, 위빙클러치, 가죽클러치백",
   "클러치":"여성숄더백가방, 미니파우치백, 미니토트백, 여자친구선물, 명품가방, 미니크로스백, 명품클러치백, 파우치클러치, 위빙클러치, 가죽클러치백",
-  "파우치":"여성숄더백가방, 미니파우치백, 미니토트백, 여자친구선물, 명품가방, 미니크로스백, 명품클러치백, 파우치클러치, 위빙클러치, 가죽클러치백",
+  "파우치":"미니파우치백, 화장품파우치, 미니파우치, 이너백, 무인양품파우치, 보냉파우치, 키티파우치, 디올파우치, 메쉬파우치, 방수파우치",
   "지갑":"여성지갑, 명품지갑, 가죽반지갑, 여성반지갑, 여성장지갑, 카드홀더여성, 슬림지갑여성, 여성카드지갑, 여성명품지갑, 미니지갑여성",
+  "여성반지갑":"여성지갑, 명품지갑, 가죽반지갑, 여성반지갑, 여성장지갑, 카드홀더여성, 슬림지갑여성, 여성카드지갑, 여성명품지갑, 미니지갑여성",
+  "여성장지갑":"여성지갑, 명품지갑, 가죽반지갑, 여성반지갑, 여성장지갑, 카드홀더여성, 슬림지갑여성, 여성카드지갑, 여성명품지갑, 미니지갑여성",
+  "카드지갑":"남자카드지갑, 남성카드지갑, 가죽카드지갑, 슬림카드지갑, 명함지갑, 남자명품지갑, 카드홀더남성, 미니지갑남성, 가죽명함지갑, 남성슬림지갑",
+  "남성숄더백":"남자숄더백, 남성숄더백, 남자가죽숄더백, 남성명품가방, 가죽숄더백, 남자크로스백, 남성데일리백, 남자출퇴근가방, 남성가방추천, 남자명품숄더백",
   "스니커즈":"여성스니커즈, 가죽스니커즈, 소가죽스니커즈, 람스킨스니커즈, 여성명품운동화, 데일리스니커즈, 여성운동화추천, 러그솔스니커즈, 빈티지스니커즈, 이탈리아스니커즈",
+  "운동화":"여성스니커즈, 가죽스니커즈, 소가죽스니커즈, 람스킨스니커즈, 여성명품운동화, 데일리스니커즈, 여성운동화추천, 러그솔스니커즈, 빈티지스니커즈, 이탈리아스니커즈",
   "샌들":"여성샌들, 가죽샌들, 여름샌들, 힐샌들, 여성여름신발, 명품샌들, 레더샌들, 스트랩샌들, 여성오픈토, 이탈리아직수입",
   "뮬":"여성뮬, 가죽뮬, 여름뮬, 여성슬리퍼, 레더뮬, 여름샌들, 여성플랫, 명품뮬, 여성여름신발, 이탈리아직수입",
+  "로퍼":"여성로퍼, 가죽로퍼, 여성플랫슈즈, 레더로퍼, 명품로퍼, 여성슈즈, 이탈리아직수입, 여성단화, 펜슬힐로퍼, 청키로퍼",
+  "플랫":"여성플랫, 발레리나플랫, 여성플랫슈즈, 가죽플랫, 명품플랫, 레더플랫, 이탈리아직수입, 여성단화, 여성슈즈, 여성여름신발",
   "벨트":"여성가죽벨트, 여자벨트, 원피스벨트, 체인벨트, 여자허리띠, 허리조절벨트, 여성소가죽벨트, 여성과배기벨트, 여성벨트추천, 가죽허리띠",
+  "여성벨트":"여성가죽벨트, 여자벨트, 원피스벨트, 체인벨트, 여자허리띠, 허리조절벨트, 여성소가죽벨트, 여성과배기벨트, 여성벨트추천, 가죽허리띠",
   "여성상의":"여성반팔티, 여성티셔츠, 레이스나시, 럭키슈에뜨, 베네통티셔츠, 나시티, 여성나시, 시슬리티셔츠, 가니티셔츠, 여성반팔",
+  "여성아우터":"여성패딩, 여성다운재킷, 여성점퍼, 여성코트, 명품다운, 몽클레르패딩, 여성겨울코트, 숏패딩, 명품아우터, 이탈리아직수입",
+  "키즈상의":"키즈반팔티, 키즈반팔, 아동반팔티, 키즈티셔츠, 유아티, 아동티셔츠, 키즈여름티, 주니어반팔티, 초등반팔티, 키즈여름옷",
+  "키즈아우터":"키즈패딩, 아동패딩, 키즈다운재킷, 아동다운, 키즈점퍼, 명품키즈패딩, 아동겨울점퍼, 키즈겨울옷, 초등패딩, 주니어패딩",
   "선글라스":"여성선글라스, 오버사이즈선글라스, 빅프레임선글라스, 아세테이트선글라스, 명품선글라스, 여름선글라스, 자외선차단선글라스, 트렌디선글라스, 데일리선글라스, 스퀘어선글라스",
+  "에코백":"에코백, 이미스에코백, 트레이더조에코백, 볼앤체인에코백, 명품에코백, 캔버스백, 미니에코백, 캉골에코백, 라쿠제트에코백, 여름에코백",
+  "스카프":"여성스카프, 명품스카프, 실크스카프, 까레스카프, 쁘띠스카프, 에르메스스카프, 여성머플러, 가을스카프, 스퀘어스카프, 이탈리아직수입",
 };
 
 const META_MAP = {
-  "숄더백":"젤리버킨백, 숄더백, 자라가방, 셀린느가방, 여름가방, 샤넬가방, 루이비통가방, 미우미우가방, 버킷백, 입생로랑가방, 프라다가방, 고야드가방, 호보백, 명품숄더백, 여성명품가방, 이탈리아직수입",
-  "크로스백":"크로스백, 구찌가방, 미니크로스백, 버버리가방, 키플링크로스백, 명품가방, 구찌크로스백, 보테가베네타가방, 프라다크로스백, 여성크로스백, 미니백, 코치크로스백, 위빙백, 이탈리아직수입, 명품병행수입",
-  "클러치":"로에베가방, 클러치백, 구찌클러치백, 여성클러치백, 루이비통클러치백, 프라다클러치백, 입생로랑클러치백, 샤넬클러치, 명품클러치백, 보테가베네타클러치, 셀린느가방, 이탈리아직수입, 명품병행수입",
-  "스니커즈":"여성스니커즈, 골든구스스니커즈, 가죽스니커즈, 소가죽스니커즈, 보테가오빗, 뉴발란스스니커즈, 여성운동화추천, 명품스니커즈, 이탈리아직수입, 빈티지스니커즈, 데일리스니커즈, 여성명품운동화, 명품병행수입",
-  "여성상의":"티셔츠, 여성반팔티, 여성티셔츠, 레이스나시, 럭키슈에뜨, 베네통티셔츠, 스튜디오톰보이, 에고이스트티셔츠, 나시, 가니티셔츠, 에고이스트, 마리떼프랑소와, 나시티, 여성나시, 시슬리티셔츠",
+  "숄더백":"젤리버킨백, 숄더백, 자라가방, 셀린느가방, 여름가방, 샤넬가방, 토리버치가방, 루이비통가방, 미우미우가방, 버킷백, 입생로랑가방, 루에브르가방, 프라다가방, 바비르가방, 고야드가방, 호보백",
+  "토트백":"코치가방, 젤리백, 토트백, 바오바오백, 라탄백, 헤지스가방, 루이비통가방, 에르메스가방, 드래곤디퓨전, 롱샴가방, 라탄가방, 고야드가방, 라피아백, 더로우가방, 디올가방, 고야드미니앙주",
+  "크로스백":"크로스백, 구찌가방, 미니크로스백, 버버리가방, 키플링크로스백, 명품가방, 구찌크로스백, 캉골크로스백, 메트로시티가방, 보테가베네타가방, 보테가베네타, 프라다크로스백, 여성크로스백, 미니백, 코치크로스백, 위빙백",
+  "클러치백":"로에베가방, 클러치백, 구찌클러치백, 여성클러치백, 루이비통클러치백, 프라다클러치백, 입생로랑클러치백, 고야드볼링25, 샤넬클러치, 로에베플라멩고, 명품클러치백, 고야드클러치백, 보테가베네타클러치, 고야드클러치, 고야드파우치, 셀린느가방",
+  "클러치":"로에베가방, 클러치백, 구찌클러치백, 여성클러치백, 루이비통클러치백, 프라다클러치백, 입생로랑클러치백, 고야드볼링25, 샤넬클러치, 로에베플라멩고, 명품클러치백, 고야드클러치백, 보테가베네타클러치, 고야드클러치, 고야드파우치, 셀린느가방",
+  "파우치":"파우치, 화장품파우치, 미니파우치, 이너백, 무인양품파우치, 보냉파우치, 레스포삭키티, 키티파우치, 디올파우치, 헬로키티파우치, 여행용화장품파우치, 생리대파우치, 헬로키티, 메쉬파우치, 방수파우치, 메이크업파우치",
+  "지갑":"셀린느지갑, 명품지갑, 여성지갑, 샤넬지갑, 루이비통지갑, 프라다지갑, 구찌지갑, 보테가지갑, 입생로랑지갑, 발렌시아가지갑, 펜디지갑, 디올지갑, 버버리지갑, 명품병행수입지갑, 이탈리아직수입지갑, 여성명품지갑",
+  "여성반지갑":"셀린느지갑, 명품지갑, 여성지갑, 샤넬지갑, 루이비통지갑, 프라다지갑, 구찌지갑, 보테가지갑, 입생로랑지갑, 발렌시아가지갑, 펜디지갑, 디올지갑, 버버리지갑, 명품병행수입지갑, 이탈리아직수입지갑, 여성명품지갑",
+  "여성장지갑":"셀린느지갑, 명품지갑, 여성지갑, 샤넬지갑, 루이비통지갑, 프라다지갑, 구찌지갑, 보테가지갑, 입생로랑지갑, 발렌시아가지갑, 펜디지갑, 디올지갑, 버버리지갑, 명품병행수입지갑, 이탈리아직수입지갑, 여성명품지갑",
+  "카드지갑":"남자지갑, 남성지갑, 남자반지갑, 남성반지갑, 남자명품지갑, 구찌지갑남성, 보테가베네타지갑, 몽블랑지갑, 구찌남성지갑, 닥스남성지갑, 벨루티남자지갑, 명품남성지갑, 셀린느남성지갑, 루이비통남성지갑, 구찌지갑, 남성명품지갑",
+  "남성숄더백":"남자숄더백, 남성숄더백, 남자가죽숄더백, 남성명품가방, 셀린느남성가방, 루이비통남성가방, 구찌남성가방, 보테가베네타남성가방, 프라다남성가방, 생로랑남성가방, 발렌시아가남성가방, 로에베남성가방, 남자명품숄더백, 남성크로스백, 남자출퇴근가방, 남성데일리백",
+  "벨트":"여성벨트, 셀린느벨트, 여성가죽벨트, 여자벨트, 에르메스벨트여성, 원피스벨트, 여자명품벨트, 구찌벨트여성, 체인벨트, 여자허리띠, 명품여성벨트, 허리조절벨트, 샤넬벨트, 여성소가죽벨트, 여성과배기벨트, 구찌여성벨트",
+  "여성벨트":"여성벨트, 셀린느벨트, 여성가죽벨트, 여자벨트, 에르메스벨트여성, 원피스벨트, 여자명품벨트, 구찌벨트여성, 체인벨트, 여자허리띠, 명품여성벨트, 허리조절벨트, 샤넬벨트, 여성소가죽벨트, 여성과배기벨트, 구찌여성벨트",
+  "선글라스":"셀린느선글라스, 여성선글라스, 오버사이즈선글라스, 명품선글라스, 프라다선글라스, 구찌선글라스, 샤넬선글라스, 디올선글라스, 보테가선글라스, 로에베선글라스, 생로랑선글라스, 발렌시아가선글라스, 이탈리아직수입, 아세테이트선글라스, 빅프레임선글라스, 여름선글라스",
+  "스니커즈":"여성스니커즈, 골든구스스니커즈, 가죽스니커즈, 소가죽스니커즈, 보테가오빗, 뉴발란스스니커즈, 아디다스스니커즈, 나이키스니커즈, 몽클레르스니커즈, 여성운동화추천, 명품스니커즈, 이탈리아직수입, 빈티지스니커즈, 러그솔스니커즈, 데일리스니커즈, 여성명품운동화",
+  "운동화":"여성스니커즈, 골든구스스니커즈, 가죽스니커즈, 소가죽스니커즈, 보테가오빗, 뉴발란스스니커즈, 아디다스스니커즈, 나이키스니커즈, 몽클레르스니커즈, 여성운동화추천, 명품스니커즈, 이탈리아직수입, 빈티지스니커즈, 러그솔스니커즈, 데일리스니커즈, 여성명품운동화",
+  "샌들":"여성샌들, 보테가베네타샌들, 가죽샌들, 여름샌들, 힐샌들, 명품샌들, 에르메스샌들, 샤넬샌들, 레더샌들, 스트랩샌들, 여성오픈토, 이탈리아직수입, 명품병행수입, 여성여름신발, 런던루크",
+  "뮬":"여성뮬, 보테가베네타뮬, 가죽뮬, 여름뮬, 에르메스샌들, 샤넬뮬, 여성슬리퍼, 레더뮬, 여름샌들, 명품뮬, 여성여름신발, 이탈리아직수입, 명품병행수입, 여성플랫슈즈, 런던루크",
+  "여성상의":"티셔츠, 여성반팔티, 여성티셔츠, 레이스나시, 럭키슈에뜨, 베네통티셔츠, 스튜디오톰보이, 에고이스트티셔츠, 나시, 가니티셔츠, 에고이스트, 마리떼프랑소와, 나시티, 여성나시, 시슬리티셔츠, 골든구스티셔츠",
+  "여성아우터":"여성패딩, 몽클레르패딩, 여성다운재킷, 여성코트, 명품다운, 숏패딩, 명품아우터, 이탈리아직수입, 명품병행수입, 여성겨울코트",
+  "키즈상의":"베베드피노, 보보쇼즈, 빈폴키즈티셔츠, 캉골키즈, 마리떼키즈, 노스페이스키즈반팔, 키즈반팔티, 폴햄키즈반팔티, 아이스비스킷, 뉴발란스키즈티셔츠",
+  "키즈아우터":"몽클레르키즈, 캐나다구스키즈, 키즈패딩, 아동패딩, 명품키즈패딩, 키즈다운재킷, 아동다운, 노스페이스키즈, 키즈겨울옷, 아동점퍼",
+  "에코백":"에코백, 이미스에코백, 트레이더조에코백, 볼앤체인에코백, 명품에코백, 트레이더조가방, 스타벅스가방, 미니에코백, 연예인에코백, 마스마롤즈에코백, 캔버스백, 캉골에코백, 라쿠제트에코백, 여름에코백, 메르시에코백",
+  "스카프":"여성스카프, 에르메스스카프, 명품스카프, 실크스카프, 까레스카프, 셀린느스카프, 루이비통스카프, 샤넬스카프, 스퀘어스카프, 이탈리아직수입, 명품병행수입, 여성머플러, 가을스카프, 쁘띠스카프",
 };
 
 // ============================================================
@@ -365,14 +640,34 @@ function reset() {
 // ============================================================
 function detectCategory(desc) {
   const d = (desc || '').toLowerCase();
-  if (d.includes('clutch') || d.includes('pochette')) return '클러치';
-  if (d.includes('backpack') || d.includes('zaino')) return '백팩';
-  if (d.includes('cross') || d.includes('tracolla')) return '크로스백';
-  if (d.includes('tote') || d.includes('shopper')) return '토트백';
-  if (d.includes('bag') || d.includes('borsa')) {
-    if (d.includes('belt') || d.includes('cintura')) return '벨트';
-    return '숄더백';
+  if (d.includes('clutch') || d.includes('pochette')) return '클러치백';
+  if (d.includes('backpack') || d.includes('zaino') || d.includes('rucksack')) return '여성백팩';
+  if (d.includes('cross') || d.includes('tracolla') || d.includes('crossbody')) return '크로스백';
+  if (d.includes('tote') || d.includes('shopper') || d.includes('cabas')) return '토트백';
+  if (d.includes('belt bag') || d.includes('beltbag') || d.includes('marsupio')) return '힙색';
+  if (d.includes('bag') || d.includes('borsa') || d.includes('hobo') || d.includes('bucket') || d.includes('sac ')) return '숄더백';
+  if (d.includes('sneaker') || d.includes('trainer') || d.includes('superstar')) return '스니커즈';
+  if (d.includes('sandal') || d.includes('sandalo') || d.includes('slingback')) return '샌들';
+  if (d.includes('mule') || d.includes('sabot') || d.includes('ciabatta') || d.includes('slider')) return '뮬';
+  if (d.includes('boot') || d.includes('stivale') || d.includes('stivaletto')) return '부츠';
+  if (d.includes('loafer') || d.includes('mocassin') || d.includes('mocassino')) return '로퍼';
+  if (d.includes('flat') || d.includes('ballerina') || d.includes('ballerine')) return '플랫';
+  if (d.includes('pump') || d.includes('heel') || d.includes('decollete')) return '힐';
+  if (d.includes('cintura') || d.includes('belt') || d.includes('ceinture')) return '여성벨트';
+  if (d.includes('occhiali') || d.includes('sunglass') || d.includes('lunette')) return '선글라스';
+  if (d.includes('portafogli') || d.includes('wallet') || d.includes('portefeuille')) return '여성반지갑';
+  if (d.includes('card') && (d.includes('holder') || d.includes('portacarte'))) return '카드지갑';
+  if (d.includes('scarf') || d.includes('foulard') || d.includes('stola') || d.includes('carre')) return '스카프';
+  if (d.includes('kid') || d.includes('bambino') || d.includes('bambina') || d.includes('child')) {
+    if (d.includes('jacket') || d.includes('coat') || d.includes('down') || d.includes('piumino')) return '키즈아우터';
+    return '키즈상의';
   }
+  if (d.includes('jacket') || d.includes('giubbotto') || d.includes('piumino') || d.includes('down') || d.includes('coat') || d.includes('cappotto')) return '여성아우터';
+  if (d.includes('dress') || d.includes('abito') || d.includes('vestito')) return '원피스';
+  if (d.includes('pant') || d.includes('trouser') || d.includes('pantalone') || d.includes('skirt') || d.includes('gonna')) return '여성하의';
+  if (d.includes('t-shirt') || d.includes('polo') || d.includes('jersey') || d.includes('maglia') || d.includes('felpa') || d.includes('sweat') || d.includes('top') || d.includes('shirt') || d.includes('blouse')) return '여성상의';
+  return '숄더백';
+}
   if (d.includes('sneaker') || d.includes('trainer')) return '스니커즈';
   if (d.includes('sandal') || d.includes('sandalo')) return '샌들';
   if (d.includes('mule') || d.includes('sabot')) return '뮬';
@@ -511,9 +806,17 @@ function handleFile(input) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = (e) => {
-    const wb = XLSX.read(e.target.result, { type: 'binary' });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    let rows = [];
+    try {
+      // CSV 파싱 시도
+      const text = e.target.result;
+      if (typeof text === 'string') {
+        rows = parseCSV(text);
+      }
+    } catch(err) {
+      alert('파일 파싱 오류: ' + err.message + '\nCSV 형식으로 저장 후 다시 시도해주세요.');
+      return;
+    }
     const settings = getSettings();
     state.products = parseRows(rows);
 
@@ -533,7 +836,7 @@ function handleFile(input) {
 
     document.getElementById('resultArea').style.display = 'block';
   };
-  reader.readAsBinaryString(file);
+  reader.readAsText(file, 'UTF-8');
 }
 
 // ============================================================
@@ -595,11 +898,31 @@ function doDownload() {
       const brandL = p.brand.toLowerCase().replace(/\s+/g,'%20');
       let mainImg = '', subImg = '';
       if (state.source === 'franz') {
-        mainImg = `https://franz.atelier-software.eu/public/foto/dddq---${brandL}---${skuL}.jpg`;
+        // 브랜드별 Franz 이미지 코드
+        const FRANZ_IMG_CODE = {
+          'saint%20laurent': 'dddq',
+          'burberry': 'dddq',
+          'celine': 'dddq',
+          'moncler': 'dddq',
+          'loewe': 'dddq',
+          'fendi': 'dddq',
+          'prada': 'dddr',
+          'golden%20goose': 'dddr',
+          'miu%20miu': 'dddr',
+          'gucci': 'dddr',
+          'stone%20island': 'dddr',
+          'max%20mara': 'dddr',
+          'bottega%20veneta': 'dddr',
+          'valentino': 'dddr',
+          'balenciaga': 'dddr',
+        };
+        const imgCode = FRANZ_IMG_CODE[brandL] || 'dddq';
+        const BASE_IMG = `https://franz.atelier-software.eu/public/foto/${imgCode}---${brandL}---${skuL}`;
+        mainImg = `${BASE_IMG}.jpg`;
         subImg = [
-          `https://franz.atelier-software.eu/public/foto/dddq---${brandL}---${skuL}_1_p.jpg`,
-          `https://franz.atelier-software.eu/public/foto/dddq---${brandL}---${skuL}_2_p.jpg`,
-          `https://franz.atelier-software.eu/public/foto/dddq---${brandL}---${skuL}_3_p.jpg`,
+          `${BASE_IMG}_1_p.jpg`,
+          `${BASE_IMG}_2_p.jpg`,
+          `${BASE_IMG}_3_p.jpg`,
         ].join('\n');
       } else if (state.source === 'leam') {
         mainImg = `https://modecraze.com/cdn/shop/files/${p.sku}_image_1.jpg`;
@@ -641,13 +964,9 @@ function doDownload() {
       return row;
     });
 
-    // 엑셀 생성
-    const wb = XLSX.utils.book_new();
-    const wsData = [h1, h2, ...dataRows];
-    const ws = XLSX.utils.aoa_to_sheet(wsData);
-    XLSX.utils.book_append_sheet(wb, ws, '일괄등록');
+    // 엑셀 생성 (순수 JS)
     const today = new Date().toISOString().slice(0,10);
-    XLSX.writeFile(wb, `스마트스토어_${si.name}_${today}.xlsx`);
+    downloadXLSX(h1, h2, dataRows, `스마트스토어_${si.name}_${today}.xlsx`);
 
     showStep(3);
   } catch(err) {
