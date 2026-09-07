@@ -63,6 +63,17 @@
     color:var(--ink);
   }
   textarea:focus{outline:2px solid var(--accent-soft); border-color:var(--accent);}
+  .dropzone{
+    border:2px dashed var(--line);
+    border-radius:8px;
+    padding:24px 12px;
+    text-align:center;
+    font-size:0.82rem;
+    color:#6b6558;
+    cursor:pointer;
+    background:#fdfcfa;
+  }
+  .dropzone.drag{border-color:var(--accent); background:var(--accent-soft); color:var(--ink);}
   .hint{
     font-size:0.78rem;
     color:#847d6e;
@@ -193,13 +204,26 @@
   <p class="sub">캡처 없이, 이미지 URL만 붙여넣으면 1000×1000 정사각형으로 자동 변환해서 저장합니다.</p>
 
   <div class="card">
-    <h2>1. 이미지 URL 붙여넣기 (한 줄에 하나씩)</h2>
+    <h2>1-A. 이미지 URL 붙여넣기 (한 줄에 하나씩)</h2>
     <textarea id="urls" placeholder="https://cdn.shopify.com/.../2000005392191_1.jpg
 https://cdn.shopify.com/.../2000005392191_2.jpg"></textarea>
-    <p class="hint">상품 페이지에서 각 이미지를 <b>우클릭 → "이미지 주소 복사"</b> 해서 여러 개를 붙여넣으세요. 아래 예시 버튼으로 먼저 테스트해볼 수 있어요.</p>
+    <p class="hint">상품 페이지에서 각 이미지를 <b>우클릭 → "이미지 주소 복사"</b> 해서 여러 개를 붙여넣으세요. URL이 막혀 있는 사이트는 자동으로 프록시를 통해 한 번 더 시도합니다. 그래도 안 되면 아래 1-B(파일 업로드)를 쓰세요.</p>
     <div class="row">
       <button class="btn-ghost" id="loadSample">예시 URL 채우기</button>
       <button class="btn-ghost" id="clearAll">초기화 (지우고 새로 시작)</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>1-B. 이미지 파일 업로드 (URL이 계속 막힐 때 가장 확실한 방법)</h2>
+    <div class="dropzone" id="dropzone">
+      <p>여기로 이미지 파일을 끌어다 놓거나 클릭해서 선택하세요.</p>
+      <input type="file" id="fileInput" accept="image/*" multiple style="display:none;">
+    </div>
+    <p class="hint">사이트에서 이미지를 <b>우클릭 → "이미지를 다른 이름으로 저장"</b>으로 내려받은 뒤 여기에 올리면, CORS 제한과 상관없이 항상 변환됩니다.</p>
+    <div class="row" id="fileListRow" style="display:none;">
+      <span class="opt" id="fileCount"></span>
+      <button class="btn-ghost" id="clearFiles">업로드 파일 지우기</button>
     </div>
   </div>
 
@@ -239,7 +263,7 @@ https://cdn.shopify.com/.../2000005392191_2.jpg"></textarea>
 </div>
 
 <footer>
-  변환은 이 브라우저 안에서만 이뤄지고, 이미지는 어디로도 전송되지 않습니다. 일부 사이트는 이미지에 다운로드 제한(CORS)을 걸어둬서 변환이 안 될 수 있는데, 이 경우 개별 카드에 "새 탭에서 열어 저장" 링크가 대신 표시됩니다.
+  URL 변환은 이 브라우저 안에서만 이뤄지고, 이미지는 이 페이지 외에는 전송되지 않습니다. 단, 사이트가 CORS로 직접 접근을 막아둔 경우 images.weserv.nl 이미지 프록시를 통해 한 번 더 시도하며, 이때는 해당 이미지가 프록시 서버를 거칩니다. 그래도 실패하면 이미지 파일을 직접 다운로드해 1-B에 업로드하세요 (완전히 로컬에서만 처리됩니다). 저작권/사용 권한이 있는 이미지(자사 상품, 공급사 제공 이미지 등)만 변환해 사용하세요.
 </footer>
 
 <script>
@@ -248,9 +272,46 @@ const resultsEl = document.getElementById('results');
 const statusEl = document.getElementById('status');
 const zipBtn = document.getElementById('zipAll');
 const processBtn = document.getElementById('process');
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const fileListRow = document.getElementById('fileListRow');
+const fileCount = document.getElementById('fileCount');
+
+let uploadedFiles = []; // File[]
+
+function refreshFileList(){
+  if(uploadedFiles.length > 0){
+    fileListRow.style.display = 'flex';
+    fileCount.textContent = `업로드된 파일 ${uploadedFiles.length}개`;
+  }else{
+    fileListRow.style.display = 'none';
+  }
+}
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropzone.classList.remove('drag');
+  const files = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/'));
+  uploadedFiles.push(...files);
+  refreshFileList();
+});
+fileInput.addEventListener('change', () => {
+  uploadedFiles.push(...fileInput.files);
+  fileInput.value = '';
+  refreshFileList();
+});
+document.getElementById('clearFiles').addEventListener('click', () => {
+  uploadedFiles = [];
+  refreshFileList();
+});
 
 document.getElementById('clearAll').addEventListener('click', () => {
   urlsEl.value = '';
+  uploadedFiles = [];
+  refreshFileList();
   resultsEl.innerHTML = '';
   processedFiles = [];
   zipBtn.disabled = true;
@@ -266,25 +327,56 @@ document.getElementById('loadSample').addEventListener('click', () => {
   ].join('\n');
 });
 
-function filenameFromUrl(url, index, ext){
-  try{
-    const u = new URL(url);
-    const last = u.pathname.split('/').filter(Boolean).pop() || ('image_' + (index+1));
-    const base = last.replace(/\.[a-zA-Z0-9]+$/, '');
-    return base + '_1000x1000.' + ext;
-  }catch(e){
-    return 'image_' + (index+1) + '_1000x1000.' + ext;
+function filenameFromSource(source, index, ext){
+  let base;
+  if(source.type === 'file'){
+    base = source.file.name.replace(/\.[a-zA-Z0-9]+$/, '');
+  }else{
+    try{
+      const u = new URL(source.value);
+      const last = u.pathname.split('/').filter(Boolean).pop() || ('image_' + (index+1));
+      base = last.replace(/\.[a-zA-Z0-9]+$/, '');
+    }catch(e){
+      base = 'image_' + (index+1);
+    }
   }
+  return base + '_1000x1000.' + ext;
 }
 
-function loadImage(url){
+function loadImage(src){
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error('load-failed'));
-    img.src = url;
+    img.src = src;
   });
+}
+
+function readFileAsDataURL(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('read-failed'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function proxyUrlFor(url){
+  return 'https://images.weserv.nl/?url=' + encodeURIComponent(url.replace(/^https?:\/\//, ''));
+}
+
+// 원본 URL 로드가 CORS로 막히면 이미지 프록시를 한 번 더 시도한다.
+async function loadImageFromSource(source){
+  if(source.type === 'file'){
+    const dataUrl = await readFileAsDataURL(source.file);
+    return loadImage(dataUrl);
+  }
+  try{
+    return await loadImage(source.value);
+  }catch(err){
+    return await loadImage(proxyUrlFor(source.value));
+  }
 }
 
 function renderToCanvas(img, bgMode, fitMode){
@@ -326,15 +418,19 @@ let processedFiles = []; // {filename, blob}
 
 processBtn.addEventListener('click', async () => {
   const lines = urlsEl.value.split('\n').map(s => s.trim()).filter(Boolean);
-  if(lines.length === 0){
-    statusEl.textContent = 'URL을 먼저 붙여넣어주세요.';
+  const sources = [
+    ...lines.map(value => ({type:'url', value})),
+    ...uploadedFiles.map(file => ({type:'file', file}))
+  ];
+  if(sources.length === 0){
+    statusEl.textContent = 'URL을 붙여넣거나 이미지 파일을 업로드해주세요.';
     return;
   }
   resultsEl.innerHTML = '';
   processedFiles = [];
   zipBtn.disabled = true;
   processBtn.disabled = true;
-  statusEl.textContent = `0 / ${lines.length} 처리 중...`;
+  statusEl.textContent = `0 / ${sources.length} 처리 중...`;
 
   const bgMode = document.getElementById('bgMode').value;
   const fitMode = document.getElementById('fitMode').value;
@@ -345,8 +441,8 @@ processBtn.addEventListener('click', async () => {
   resultsEl.appendChild(grid);
 
   let done = 0;
-  for(let i=0;i<lines.length;i++){
-    const url = lines[i];
+  for(let i=0;i<sources.length;i++){
+    const source = sources[i];
     const tile = document.createElement('div');
     tile.className = 'tile';
     const thumb = document.createElement('div');
@@ -359,10 +455,10 @@ processBtn.addEventListener('click', async () => {
     grid.appendChild(tile);
 
     try{
-      const img = await loadImage(url);
+      const img = await loadImageFromSource(source);
       const canvas = renderToCanvas(img, bgMode, fitMode);
       const blob = await canvasToBlob(canvas, format);
-      const filename = filenameFromUrl(url, i, format === 'png' ? 'png' : 'jpg');
+      const filename = filenameFromSource(source, i, format === 'png' ? 'png' : 'jpg');
 
       thumb.textContent = '';
       thumb.appendChild(canvas);
@@ -388,25 +484,27 @@ processBtn.addEventListener('click', async () => {
     }catch(err){
       thumb.classList.add('error');
       thumb.textContent = '변환 실패 (접근 제한)';
-      const link = document.createElement('a');
-      link.className = 'fallback';
-      link.href = url;
-      link.target = '_blank';
-      link.rel = 'noopener';
-      link.textContent = '새 탭에서 열어 저장';
-      meta.appendChild(link);
+      if(source.type === 'url'){
+        const link = document.createElement('a');
+        link.className = 'fallback';
+        link.href = source.value;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.textContent = '새 탭에서 열어 저장 후 파일 업로드(1-B) 이용';
+        meta.appendChild(link);
+      }
     }
 
     done++;
-    statusEl.textContent = `${done} / ${lines.length} 처리 완료`;
+    statusEl.textContent = `${done} / ${sources.length} 처리 완료`;
   }
 
   processBtn.disabled = false;
   if(processedFiles.length > 0){
     zipBtn.disabled = false;
-    statusEl.textContent = `완료: ${processedFiles.length} / ${lines.length}개 변환 성공`;
+    statusEl.textContent = `완료: ${processedFiles.length} / ${sources.length}개 변환 성공`;
   }else{
-    statusEl.textContent = `변환된 이미지가 없습니다. 이미지 URL을 다시 확인해주세요.`;
+    statusEl.textContent = `변환된 이미지가 없습니다. 이미지 URL 또는 파일을 다시 확인해주세요.`;
   }
 });
 
