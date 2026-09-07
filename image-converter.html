@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>상품 이미지 1000×1000 저장 도구</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root{
+    --ink:#1c1c1a;
+    --paper:#faf9f6;
+    --line:#dcd8cf;
+    --accent:#8a6d3b;
+    --accent-soft:#efe6d3;
+    --danger:#a3402f;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    line-height:1.5;
+    padding: 28px 18px 80px;
+  }
+  .wrap{max-width:720px;margin:0 auto;}
+  h1{
+    font-size:1.3rem;
+    font-weight:700;
+    margin:0 0 4px;
+    letter-spacing:-0.01em;
+  }
+  .sub{
+    color:#6b6558;
+    font-size:0.88rem;
+    margin:0 0 22px;
+  }
+  .card{
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:16px;
+    margin-bottom:16px;
+  }
+  .card h2{
+    font-size:0.82rem;
+    font-weight:700;
+    text-transform:none;
+    color:#544f45;
+    margin:0 0 10px;
+  }
+  textarea{
+    width:100%;
+    min-height:110px;
+    resize:vertical;
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:10px 12px;
+    font-family:var(--mono);
+    font-size:0.82rem;
+    background:#fdfcfa;
+    color:var(--ink);
+  }
+  textarea:focus{outline:2px solid var(--accent-soft); border-color:var(--accent);}
+  .hint{
+    font-size:0.78rem;
+    color:#847d6e;
+    margin-top:8px;
+  }
+  .row{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    align-items:center;
+    margin-top:12px;
+  }
+  .opt{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    font-size:0.82rem;
+    background:var(--accent-soft);
+    padding:6px 10px;
+    border-radius:20px;
+  }
+  select{
+    border:none;
+    background:transparent;
+    font-size:0.82rem;
+    color:var(--ink);
+    font-weight:600;
+  }
+  button{
+    font-family:inherit;
+    cursor:pointer;
+    border:none;
+    border-radius:8px;
+    padding:10px 16px;
+    font-size:0.85rem;
+    font-weight:600;
+  }
+  .btn-primary{
+    background:var(--ink);
+    color:#fff;
+  }
+  .btn-primary:disabled{background:#bcb8ac;cursor:not-allowed;}
+  .btn-ghost{
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--ink);
+  }
+  .status{
+    font-size:0.8rem;
+    color:#847d6e;
+    margin-top:10px;
+    min-height:1em;
+  }
+  .grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(140px,1fr));
+    gap:12px;
+    margin-top:6px;
+  }
+  .tile{
+    border:1px solid var(--line);
+    border-radius:8px;
+    overflow:hidden;
+    background:#fff;
+  }
+  .tile .thumb{
+    width:100%;
+    aspect-ratio:1/1;
+    background:
+      linear-gradient(45deg,#eee 25%,transparent 25%),
+      linear-gradient(-45deg,#eee 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#eee 75%),
+      linear-gradient(-45deg,transparent 75%,#eee 75%);
+    background-size:16px 16px;
+    background-position:0 0,0 8px,8px -8px,-8px 0px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    position:relative;
+  }
+  .tile .thumb img{
+    max-width:100%;
+    max-height:100%;
+    display:block;
+  }
+  .tile .thumb.error{
+    background:#fbeceA;
+    color:var(--danger);
+    font-size:0.72rem;
+    text-align:center;
+    padding:8px;
+  }
+  .tile .meta{
+    padding:8px 10px 10px;
+  }
+  .tile .fname{
+    font-size:0.7rem;
+    color:#6b6558;
+    word-break:break-all;
+    margin-bottom:8px;
+    font-family:var(--mono);
+  }
+  .tile button{
+    width:100%;
+    background:var(--accent-soft);
+    color:#544217;
+    padding:6px 0;
+    font-size:0.76rem;
+  }
+  .tile a.fallback{
+    display:block;
+    text-align:center;
+    font-size:0.72rem;
+    color:var(--danger);
+    margin-top:4px;
+  }
+  footer{
+    max-width:720px;
+    margin:24px auto 0;
+    font-size:0.75rem;
+    color:#a49c8a;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>상품 이미지 → 1000×1000 저장 도구</h1>
+  <p class="sub">캡처 없이, 이미지 URL만 붙여넣으면 1000×1000 정사각형으로 자동 변환해서 저장합니다.</p>
+
+  <div class="card">
+    <h2>1. 이미지 URL 붙여넣기 (한 줄에 하나씩)</h2>
+    <textarea id="urls" placeholder="https://cdn.shopify.com/.../2000005392191_1.jpg
+https://cdn.shopify.com/.../2000005392191_2.jpg"></textarea>
+    <p class="hint">상품 페이지에서 각 이미지를 <b>우클릭 → "이미지 주소 복사"</b> 해서 여러 개를 붙여넣으세요. 아래 예시 버튼으로 먼저 테스트해볼 수 있어요.</p>
+    <div class="row">
+      <button class="btn-ghost" id="loadSample">예시 URL 채우기</button>
+      <button class="btn-ghost" id="clearAll">초기화 (지우고 새로 시작)</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2. 옵션</h2>
+    <div class="row">
+      <div class="opt">
+        배경
+        <select id="bgMode">
+          <option value="white">흰색 배경</option>
+          <option value="transparent">투명 (PNG)</option>
+        </select>
+      </div>
+      <div class="opt">
+        맞춤 방식
+        <select id="fitMode">
+          <option value="contain">전체가 보이게 (여백 추가)</option>
+          <option value="cover">꽉 채우기 (일부 잘림)</option>
+        </select>
+      </div>
+      <div class="opt">
+        포맷
+        <select id="format">
+          <option value="jpg">JPG</option>
+          <option value="png">PNG</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <button class="btn-primary" id="process">1000×1000으로 변환</button>
+      <button class="btn-ghost" id="zipAll" disabled>전체 ZIP 다운로드</button>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+
+  <div id="results"></div>
+</div>
+
+<footer>
+  변환은 이 브라우저 안에서만 이뤄지고, 이미지는 어디로도 전송되지 않습니다. 일부 사이트는 이미지에 다운로드 제한(CORS)을 걸어둬서 변환이 안 될 수 있는데, 이 경우 개별 카드에 "새 탭에서 열어 저장" 링크가 대신 표시됩니다.
+</footer>
+
+<script>
+const urlsEl = document.getElementById('urls');
+const resultsEl = document.getElementById('results');
+const statusEl = document.getElementById('status');
+const zipBtn = document.getElementById('zipAll');
+const processBtn = document.getElementById('process');
+
+document.getElementById('clearAll').addEventListener('click', () => {
+  urlsEl.value = '';
+  resultsEl.innerHTML = '';
+  processedFiles = [];
+  zipBtn.disabled = true;
+  statusEl.textContent = '초기화되었습니다. 새 URL을 붙여넣어주세요.';
+});
+
+document.getElementById('loadSample').addEventListener('click', () => {
+  urlsEl.value = [
+    'https://www.etiqueboutique.com/cdn/shop/files/2000005392191_1.jpg?v=1786160689',
+    'https://www.etiqueboutique.com/cdn/shop/files/2000005392191_2.jpg?v=1786160689',
+    'https://www.etiqueboutique.com/cdn/shop/files/2000005392191_3.jpg?v=1786160689',
+    'https://www.etiqueboutique.com/cdn/shop/files/2000005392191_4.jpg?v=1786160689'
+  ].join('\n');
+});
+
+function filenameFromUrl(url, index, ext){
+  try{
+    const u = new URL(url);
+    const last = u.pathname.split('/').filter(Boolean).pop() || ('image_' + (index+1));
+    const base = last.replace(/\.[a-zA-Z0-9]+$/, '');
+    return base + '_1000x1000.' + ext;
+  }catch(e){
+    return 'image_' + (index+1) + '_1000x1000.' + ext;
+  }
+}
+
+function loadImage(url){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('load-failed'));
+    img.src = url;
+  });
+}
+
+function renderToCanvas(img, bgMode, fitMode){
+  const size = 1000;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  if(bgMode === 'white'){
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0,0,size,size);
+  }
+
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  let scale;
+  if(fitMode === 'contain'){
+    scale = Math.min(size/iw, size/ih);
+  }else{
+    scale = Math.max(size/iw, size/ih);
+  }
+  const dw = iw*scale, dh = ih*scale;
+  const dx = (size-dw)/2, dy = (size-dh)/2;
+  ctx.drawImage(img, dx, dy, dw, dh);
+  return canvas;
+}
+
+function canvasToBlob(canvas, format){
+  const mime = format === 'png' ? 'image/png' : 'image/jpeg';
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => {
+      if(blob) resolve(blob);
+      else reject(new Error('blob-failed'));
+    }, mime, 0.92);
+  });
+}
+
+let processedFiles = []; // {filename, blob}
+
+processBtn.addEventListener('click', async () => {
+  const lines = urlsEl.value.split('\n').map(s => s.trim()).filter(Boolean);
+  if(lines.length === 0){
+    statusEl.textContent = 'URL을 먼저 붙여넣어주세요.';
+    return;
+  }
+  resultsEl.innerHTML = '';
+  processedFiles = [];
+  zipBtn.disabled = true;
+  processBtn.disabled = true;
+  statusEl.textContent = `0 / ${lines.length} 처리 중...`;
+
+  const bgMode = document.getElementById('bgMode').value;
+  const fitMode = document.getElementById('fitMode').value;
+  const format = document.getElementById('format').value;
+
+  const grid = document.createElement('div');
+  grid.className = 'grid';
+  resultsEl.appendChild(grid);
+
+  let done = 0;
+  for(let i=0;i<lines.length;i++){
+    const url = lines[i];
+    const tile = document.createElement('div');
+    tile.className = 'tile';
+    const thumb = document.createElement('div');
+    thumb.className = 'thumb';
+    thumb.textContent = '불러오는 중...';
+    tile.appendChild(thumb);
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    tile.appendChild(meta);
+    grid.appendChild(tile);
+
+    try{
+      const img = await loadImage(url);
+      const canvas = renderToCanvas(img, bgMode, fitMode);
+      const blob = await canvasToBlob(canvas, format);
+      const filename = filenameFromUrl(url, i, format === 'png' ? 'png' : 'jpg');
+
+      thumb.textContent = '';
+      thumb.appendChild(canvas);
+      canvas.style.maxWidth = '100%';
+      canvas.style.maxHeight = '100%';
+
+      const fnameEl = document.createElement('div');
+      fnameEl.className = 'fname';
+      fnameEl.textContent = filename;
+      meta.appendChild(fnameEl);
+
+      const dlBtn = document.createElement('button');
+      dlBtn.textContent = '다운로드';
+      dlBtn.addEventListener('click', () => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+      });
+      meta.appendChild(dlBtn);
+
+      processedFiles.push({filename, blob});
+    }catch(err){
+      thumb.classList.add('error');
+      thumb.textContent = '변환 실패 (접근 제한)';
+      const link = document.createElement('a');
+      link.className = 'fallback';
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.textContent = '새 탭에서 열어 저장';
+      meta.appendChild(link);
+    }
+
+    done++;
+    statusEl.textContent = `${done} / ${lines.length} 처리 완료`;
+  }
+
+  processBtn.disabled = false;
+  if(processedFiles.length > 0){
+    zipBtn.disabled = false;
+    statusEl.textContent = `완료: ${processedFiles.length} / ${lines.length}개 변환 성공`;
+  }else{
+    statusEl.textContent = `변환된 이미지가 없습니다. 이미지 URL을 다시 확인해주세요.`;
+  }
+});
+
+zipBtn.addEventListener('click', async () => {
+  if(processedFiles.length === 0) return;
+  statusEl.textContent = 'ZIP 파일 만드는 중...';
+  const zip = new JSZip();
+  processedFiles.forEach(f => zip.file(f.filename, f.blob));
+  const content = await zip.generateAsync({type:'blob'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(content);
+  a.download = '상품이미지_1000x1000.zip';
+  a.click();
+  statusEl.textContent = `ZIP 다운로드 완료 (${processedFiles.length}개)`;
+});
+</script>
+</body>
+</html>
