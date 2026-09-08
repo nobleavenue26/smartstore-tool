@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>런던루크 스마트스토어 자동화 v2</title>
+<title>스마트스토어 대량등록 자동계산기</title>
 <script>
 // ============================================================
 // 순수 JS CSV/XLSX 파서 & 생성기
@@ -296,8 +296,9 @@ body { font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; backgroun
 
   <!-- 헤더 -->
   <div class="header">
-    <h1>🛍️ 런던루크</h1>
-    <p>스마트스토어 일괄등록 자동화 v2.0</p>
+    <h1>📦 스마트스토어 자동계산기</h1>
+    <p>해외소싱 카탈로그 → 마진 계산 → 일괄등록 엑셀 자동 생성</p>
+    <p style="font-size:10px;color:#BBB;margin-top:6px">※ 관세/세금 계산은 참고용입니다. 실제 신고·통관 금액은 관세사를 통해 확인하세요.</p>
   </div>
 
   <!-- 스텝 -->
@@ -309,19 +310,13 @@ body { font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; backgroun
 
   <!-- STEP 1: 설정 -->
   <div id="step1">
-    <!-- 스토어 선택 -->
+    <!-- 스토어 정보 -->
     <div class="card">
-      <div class="card-title">스토어 선택</div>
-      <div class="grid2">
-        <div class="btn-sel active" data-store="london" onclick="selStore(this)">
-          <span class="name">🛍️ 런던루크</span>
-          <span class="sub">HYUNDAI · 010-9122-7221</span>
-        </div>
-        <div class="btn-sel" data-store="noble" onclick="selStore(this)">
-          <span class="name">🌟 노블애비뉴</span>
-          <span class="sub">EPOST · 010-2456-9290</span>
-        </div>
-      </div>
+      <div class="card-title">내 스토어 정보</div>
+      <div class="input-row"><div class="input-label">스토어명</div><input type="text" id="storeName" value="내 스토어" style="flex:1;border:1.5px solid #E0D9D0;border-radius:8px;padding:9px 12px;font-size:14px;font-weight:700;outline:none;background:#FAFAFA"></div>
+      <div class="input-row"><div class="input-label">A/S 전화번호</div><input type="text" id="storePhone" value="010-0000-0000" style="flex:1;border:1.5px solid #E0D9D0;border-radius:8px;padding:9px 12px;font-size:14px;font-weight:700;outline:none;background:#FAFAFA"></div>
+      <div class="input-row"><div class="input-label">수입사명</div><input type="text" id="storeImporter" value="내 스토어" style="flex:1;border:1.5px solid #E0D9D0;border-radius:8px;padding:9px 12px;font-size:14px;font-weight:700;outline:none;background:#FAFAFA"></div>
+      <div class="input-row"><div class="input-label">택배사</div><input type="text" id="storeCourier" value="CJ대한통운" style="flex:1;border:1.5px solid #E0D9D0;border-radius:8px;padding:9px 12px;font-size:14px;font-weight:700;outline:none;background:#FAFAFA"></div>
     </div>
 
     <!-- 소싱처 선택 -->
@@ -524,8 +519,8 @@ const META_MAP = {
   "선글라스":"셀린느선글라스, 여성선글라스, 오버사이즈선글라스, 명품선글라스, 프라다선글라스, 구찌선글라스, 샤넬선글라스, 디올선글라스, 보테가선글라스, 로에베선글라스, 생로랑선글라스, 발렌시아가선글라스, 이탈리아직수입, 아세테이트선글라스, 빅프레임선글라스, 여름선글라스",
   "스니커즈":"여성스니커즈, 골든구스스니커즈, 가죽스니커즈, 소가죽스니커즈, 보테가오빗, 뉴발란스스니커즈, 아디다스스니커즈, 나이키스니커즈, 몽클레르스니커즈, 여성운동화추천, 명품스니커즈, 이탈리아직수입, 빈티지스니커즈, 러그솔스니커즈, 데일리스니커즈, 여성명품운동화",
   "운동화":"여성스니커즈, 골든구스스니커즈, 가죽스니커즈, 소가죽스니커즈, 보테가오빗, 뉴발란스스니커즈, 아디다스스니커즈, 나이키스니커즈, 몽클레르스니커즈, 여성운동화추천, 명품스니커즈, 이탈리아직수입, 빈티지스니커즈, 러그솔스니커즈, 데일리스니커즈, 여성명품운동화",
-  "샌들":"여성샌들, 보테가베네타샌들, 가죽샌들, 여름샌들, 힐샌들, 명품샌들, 에르메스샌들, 샤넬샌들, 레더샌들, 스트랩샌들, 여성오픈토, 이탈리아직수입, 명품병행수입, 여성여름신발, 런던루크",
-  "뮬":"여성뮬, 보테가베네타뮬, 가죽뮬, 여름뮬, 에르메스샌들, 샤넬뮬, 여성슬리퍼, 레더뮬, 여름샌들, 명품뮬, 여성여름신발, 이탈리아직수입, 명품병행수입, 여성플랫슈즈, 런던루크",
+  "샌들":"여성샌들, 보테가베네타샌들, 가죽샌들, 여름샌들, 힐샌들, 명품샌들, 에르메스샌들, 샤넬샌들, 레더샌들, 스트랩샌들, 여성오픈토, 이탈리아직수입, 명품병행수입, 여성여름신발",
+  "뮬":"여성뮬, 보테가베네타뮬, 가죽뮬, 여름뮬, 에르메스샌들, 샤넬뮬, 여성슬리퍼, 레더뮬, 여름샌들, 명품뮬, 여성여름신발, 이탈리아직수입, 명품병행수입, 여성플랫슈즈",
   "여성상의":"티셔츠, 여성반팔티, 여성티셔츠, 레이스나시, 럭키슈에뜨, 베네통티셔츠, 스튜디오톰보이, 에고이스트티셔츠, 나시, 가니티셔츠, 에고이스트, 마리떼프랑소와, 나시티, 여성나시, 시슬리티셔츠, 골든구스티셔츠",
   "여성아우터":"여성패딩, 몽클레르패딩, 여성다운재킷, 여성코트, 명품다운, 숏패딩, 명품아우터, 이탈리아직수입, 명품병행수입, 여성겨울코트",
   "키즈상의":"베베드피노, 보보쇼즈, 빈폴키즈티셔츠, 캉골키즈, 마리떼키즈, 노스페이스키즈반팔, 키즈반팔티, 폴햄키즈반팔티, 아이스비스킷, 뉴발란스키즈티셔츠",
@@ -538,25 +533,23 @@ const META_MAP = {
 // 상태
 // ============================================================
 let state = {
-  store: "london", source: "franz", season: "SS26",
+  source: "franz", season: "SS26",
   hasDuty: true, hasLuxury: true,
   products: [],
 };
 
-const STORE_INFO = {
-  london: { name:"런던루크", phone:"010-9122-7221", importer:"런던루크", courier:"HYUNDAI" },
-  noble:  { name:"노블애비뉴", phone:"010-2456-9290", importer:"노블애비뉴", courier:"EPOST" },
-};
+function getStoreInfo() {
+  return {
+    name: document.getElementById('storeName').value.trim() || '내 스토어',
+    phone: document.getElementById('storePhone').value.trim() || '010-0000-0000',
+    importer: document.getElementById('storeImporter').value.trim() || '내 스토어',
+    courier: document.getElementById('storeCourier').value.trim() || 'CJ대한통운',
+  };
+}
 
 // ============================================================
 // UI 제어
 // ============================================================
-function selStore(el) {
-  document.querySelectorAll('[data-store]').forEach(e => e.classList.remove('active'));
-  el.classList.add('active');
-  state.store = el.dataset.store;
-}
-
 function selSource(el) {
   document.querySelectorAll('[data-src]').forEach(e => e.classList.remove('active'));
   el.classList.add('active');
@@ -834,7 +827,7 @@ function doDownload() {
 
   try {
     const settings = getSettings();
-    const si = STORE_INFO[state.store];
+    const si = getStoreInfo();
     const AS_INFO = `고객센터 ${si.phone} / 브랜드 공인 하자에 한해 처리 가능 / 수령 후 1일 이내 접수 필수`;
 
     // 헤더 2행
