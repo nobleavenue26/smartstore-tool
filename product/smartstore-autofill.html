@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>스마트스토어 대량등록 자동화 — 이미지·속성·태그 자동채움</title>
+<script>
+// ============================================================
+// 순수 JS CSV/XLSX 파서 & 생성기 (서버 전송 없음 — 모든 처리는 브라우저 안에서)
+// ============================================================
+function parseCSV(text) {
+  const lines = text.split(/\r?\n/);
+  if (lines.length === 0) return [];
+  const headers = splitCSVLine(lines[0]);
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    const vals = splitCSVLine(lines[i]);
+    const obj = {};
+    headers.forEach((h, idx) => { obj[h.trim()] = (vals[idx] || '').trim(); });
+    rows.push(obj);
+  }
+  return rows;
+}
+
+function splitCSVLine(line) {
+  const result = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') { inQ = !inQ; }
+    else if (c === ',' && !inQ) { result.push(cur); cur = ''; }
+    else { cur += c; }
+  }
+  result.push(cur);
+  return result;
+}
+
+function createXLSX(headers1, headers2, dataRows) {
+  const escXML = (s) => String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+
+  const allRows = [headers1, headers2, ...dataRows];
+  let rowsXML = '';
+
+  allRows.forEach((row, ri) => {
+    let cellsXML = '';
+    row.forEach((cell, ci) => {
+      const col = colName(ci);
+      const ref = col + (ri + 1);
+      if (cell === null || cell === undefined || cell === '') return;
+      if (typeof cell === 'number') {
+        cellsXML += `<c r="${ref}" t="n"><v>${cell}</v></c>`;
+      } else {
+        const val = escXML(String(cell));
+        cellsXML += `<c r="${ref}" t="inlineStr"><is><t>${val}</t></is></c>`;
+      }
+    });
+    rowsXML += `<row r="${ri+1}">${cellsXML}</row>`;
+  });
+
+  const sheet = `<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rowsXML}</sheetData></worksheet>`;
+
+  const workbook = `<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="상품등록" sheetId="1" r:id="rId1"/></sheets></workbook>`;
+
+  const rels = `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`;
+
+  const contentTypes = `<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`;
+
+  const appRels = `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`;
+
+  return { sheet, workbook, rels, contentTypes, appRels };
+}
+
+function colName(idx) {
+  let s = '';
+  idx++;
+  while (idx > 0) {
+    let r = (idx - 1) % 26;
+    s = String.fromCharCode(65 + r) + s;
+    idx = Math.floor((idx - 1) / 26);
+  }
+  return s;
+}
+
+function makeZip(files) {
+  const parts = [];
+  const centralDir = [];
+  let offset = 0;
+
+  function crc32(data) {
+    const table = [];
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) {
+        c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+      }
+      table[n] = c;
+    }
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < data.length; i++) {
+      crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
+    }
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+
+  function str2bytes(str) { return new TextEncoder().encode(str); }
+  function uint32le(n) { return [n & 0xFF, (n >> 8) & 0xFF, (n >> 16) & 0xFF, (n >> 24) & 0xFF]; }
+  function uint16le(n) { return [n & 0xFF, (n >> 8) & 0xFF]; }
+
+  for (const [name, content] of Object.entries(files)) {
+    const nameBytes = str2bytes(name);
+    const dataBytes = str2bytes(content);
+    const crc = crc32(dataBytes);
+    const size = dataBytes.length;
+    const localHeader = [
+      0x50,0x4B,0x03,0x04, 0x14,0x00, 0x00,0x00, 0x00,0x00, 0x00,0x00, 0x00,0x00,
+      ...uint32le(crc), ...uint32le(size), ...uint32le(size),
+      ...uint16le(nameBytes.length), 0x00,0x00,
+      ...nameBytes, ...dataBytes,
+    ];
+    centralDir.push({ name: nameBytes, nameLen: nameBytes.length, crc, size, offset });
+    offset += localHeader.length;
+    parts.push(...localHeader);
+  }
+
+  const cdOffset = offset;
+  let cdSize = 0;
+  const cdParts = [];
+  for (const e of centralDir) {
+    const cd = [
+      0x50,0x4B,0x01,0x02, 0x14,0x00,0x14,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+      ...uint32le(e.crc), ...uint32le(e.size), ...uint32le(e.size),
+      ...uint16le(e.nameLen), 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+      ...uint32le(e.offset), ...e.name,
+    ];
+    cdParts.push(...cd);
+    cdSize += cd.length;
+  }
+
+  const eocd = [
+    0x50,0x4B,0x05,0x06, 0x00,0x00,0x00,0x00,
+    ...uint16le(centralDir.length), ...uint16le(centralDir.length),
+    ...uint32le(cdSize), ...uint32le(cdOffset), 0x00,0x00,
+  ];
+
+  return new Uint8Array([...parts, ...cdParts, ...eocd]);
+}
+
+function downloadXLSX(headers1, headers2, dataRows, filename) {
+  const { sheet, workbook, rels, contentTypes, appRels } = createXLSX(headers1, headers2, dataRows);
+  const files = {
+    '[Content_Types].xml': contentTypes,
+    '_rels/.rels': appRels,
+    'xl/workbook.xml': workbook,
+    'xl/_rels/workbook.xml.rels': rels,
+    'xl/worksheets/sheet1.xml': sheet,
+  };
+  const zipData = makeZip(files);
+  const blob = new Blob([zipData], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; background: #F8F5F1; min-height: 100vh; padding: 20px 16px 60px; }
+.wrap { max-width: 680px; margin: 0 auto; }
+.header { text-align: center; margin-bottom: 24px; }
+.header h1 { font-size: 21px; font-weight: 800; color: #1A1A1A; letter-spacing: -0.5px; }
+.header p { font-size: 12px; color: #999; margin-top: 4px; }
+.steps { display: flex; justify-content: center; gap: 6px; margin-bottom: 20px; flex-wrap: wrap; }
+.step { padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; background: #E0D9D0; color: #999; cursor: pointer; }
+.step.active { background: #C9A96E; color: #fff; }
+.card { background: #fff; border-radius: 16px; padding: 20px; margin-bottom: 14px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+.card-title { font-size: 11px; font-weight: 700; color: #AAA; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+.card-hint { font-size: 11px; color: #B8893A; margin-bottom: 14px; line-height: 1.5; }
+.input-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.input-label { font-size: 12px; color: #666; min-width: 150px; flex-shrink: 0; }
+.input-row input, .input-row textarea { flex: 1; border: 1.5px solid #E0D9D0; border-radius: 8px; padding: 9px 12px; font-size: 13px; font-weight: 600; outline: none; background: #FAFAFA; font-family: inherit; }
+.input-row textarea { resize: vertical; min-height: 46px; }
+.toggle { width: 44px; height: 26px; border-radius: 13px; position: relative; cursor: pointer; transition: background .2s; flex-shrink: 0; background: #DDD; }
+.toggle.on { background: #4A9A4A; }
+.toggle::after { content: ''; position: absolute; width: 20px; height: 20px; background: #fff; border-radius: 50%; top: 3px; left: 3px; transition: left .2s; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+.toggle.on::after { left: 21px; }
+.divider { height: 1px; background: #F0EDE8; margin: 14px 0; }
+.info-box { background: #FDF8F0; border-radius: 8px; padding: 10px 14px; font-size: 11px; color: #B8893A; margin-bottom: 12px; line-height: 1.6; }
+.token { display: inline-block; background: #F0EDE8; border-radius: 5px; padding: 1px 6px; font-family: monospace; color: #666; }
+.upload-area { border: 2px dashed #C9A96E; border-radius: 12px; padding: 32px 20px; cursor: pointer; background: #FDF8F0; text-align: center; }
+.upload-area .icon { font-size: 36px; margin-bottom: 8px; }
+.upload-area .title { font-size: 14px; font-weight: 700; color: #B8893A; }
+.upload-area .sub { font-size: 11px; color: #999; margin-top: 6px; }
+.result-card { background: #1A1A1A; border-radius: 16px; padding: 20px; margin-bottom: 14px; }
+.result-title { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+.result-list { max-height: 280px; overflow-y: auto; }
+.result-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #2E2E2E; font-size: 12px; }
+.result-item .left { color: #CCC; }
+.result-item .cat { color: #666; font-size: 10px; margin-left: 4px; }
+.result-item .price { color: #C9A96E; font-weight: 700; }
+.btn-primary { width: 100%; background: linear-gradient(135deg, #C9A96E, #A07840); color: #fff; border: none; border-radius: 12px; padding: 16px; font-size: 15px; font-weight: 700; cursor: pointer; letter-spacing: -0.3px; }
+.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-secondary { width: 100%; background: transparent; border: 1.5px solid #E0D9D0; color: #999; border-radius: 12px; padding: 13px; font-size: 13px; cursor: pointer; margin-top: 10px; }
+.done-card { background: #1A1A1A; border-radius: 16px; padding: 32px 24px; text-align: center; }
+.done-icon { font-size: 56px; margin-bottom: 14px; }
+.done-title { font-size: 20px; font-weight: 800; color: #C9A96E; margin-bottom: 12px; }
+.done-steps { font-size: 13px; color: #888; line-height: 2; }
+table.tagtable { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.tagtable th { text-align: left; font-size: 10px; color: #AAA; text-transform: uppercase; padding: 6px 4px; border-bottom: 1px solid #E0D9D0; }
+table.tagtable td { padding: 4px; vertical-align: top; border-bottom: 1px solid #F5F2ED; }
+table.tagtable td.catname { font-size: 12px; font-weight: 700; color: #333; white-space: nowrap; padding-top: 10px; }
+table.tagtable textarea { width: 100%; border: 1.5px solid #E0D9D0; border-radius: 6px; padding: 6px 8px; font-size: 12px; font-family: inherit; resize: vertical; min-height: 36px; }
+.savebar { display: flex; gap: 8px; margin-top: 14px; align-items: center; }
+.savebar .msg { font-size: 11px; color: #4A9A4A; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="header">
+    <h1>📦 스마트스토어 대량등록 자동화</h1>
+    <p>이미지 URL · 속성 · 판매자특이사항 자동채움 — 데이터는 브라우저 밖으로 나가지 않습니다</p>
+  </div>
+
+  <div class="steps">
+    <div class="step active" id="step1-tab" onclick="showStep(1)">① 기본설정</div>
+    <div class="step" id="step2-tab" onclick="showStep(2)">② 카테고리 문구</div>
+    <div class="step" id="step3-tab" onclick="showStep(3)">③ 파일업로드</div>
+    <div class="step" id="step4-tab" onclick="showStep(4)">④ 다운로드</div>
+  </div>
+
+  <!-- STEP 1: 기본 설정 -->
+  <div id="step1">
+    <div class="card">
+      <div class="card-title">스토어 정보</div>
+      <div class="input-row"><div class="input-label">상호명</div><input id="s_storeName" placeholder="내 스토어명"></div>
+      <div class="input-row"><div class="input-label">A/S 전화번호</div><input id="s_asPhone" placeholder="010-0000-0000"></div>
+      <div class="input-row"><div class="input-label">수입사명</div><input id="s_importer" placeholder="수입사/사업자명"></div>
+      <div class="input-row"><div class="input-label">택배사코드</div><input id="s_courier" placeholder="예: HYUNDAI, CJGLS, EPOST"></div>
+      <div class="input-row"><div class="input-label">배송방법</div><input id="s_shipMethod" placeholder="택배, 소포, 등기"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">가격 계산</div>
+      <div class="input-row"><div class="input-label">환율 (₩/€)</div><input type="number" id="s_eurKrw"></div>
+      <div class="input-row"><div class="input-label">배송비 (€)</div><input type="number" id="s_shipping"></div>
+      <div class="input-row"><div class="input-label">관세율 (%)</div><input type="number" id="s_dutyRate"></div>
+      <div class="input-row"><div class="input-label">부가세율 (%)</div><input type="number" id="s_vatRate"></div>
+      <div class="input-row"><div class="input-label">마진율 (%)</div><input type="number" id="s_marginRate"></div>
+      <div class="input-row"><div class="input-label">스마트스토어 수수료 (%)</div><input type="number" id="s_ssRate"></div>
+      <div class="divider"></div>
+      <div class="input-row">
+        <div class="input-label">관세 적용</div>
+        <div class="toggle" id="dutyToggle" onclick="toggleDuty()"></div>
+      </div>
+      <div class="input-row">
+        <div class="input-label">개별소비세 적용 (가방류)</div>
+        <div class="toggle" id="luxuryToggle" onclick="toggleLuxury()"></div>
+      </div>
+      <div class="input-row"><div class="input-label">개별소비세 기준금액(₩)</div><input type="number" id="s_luxThreshold"></div>
+      <div class="divider"></div>
+      <div class="input-row"><div class="input-label">반품배송비(₩)</div><input type="number" id="s_returnFee"></div>
+      <div class="input-row"><div class="input-label">교환배송비(₩)</div><input type="number" id="s_exchangeFee"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">이미지 URL 템플릿</div>
+      <div class="card-hint">공급사 이미지 서버의 URL 패턴을 넣어두면 상품마다 자동으로 채워집니다. 사용 가능한 변수: <span class="token">{sku}</span> <span class="token">{sku_lower}</span> <span class="token">{brand}</span> <span class="token">{brand_lower}</span> <span class="token">{color}</span></div>
+      <div class="input-row"><div class="input-label">대표이미지 템플릿</div><input id="s_mainImgTpl" placeholder="https://example.com/img/{sku}_1.jpg"></div>
+      <div class="input-row"><div class="input-label">추가이미지 템플릿</div><textarea id="s_subImgTpl" placeholder="한 줄에 하나씩&#10;https://example.com/img/{sku}_2.jpg&#10;https://example.com/img/{sku}_3.jpg"></textarea></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">상세설명 템플릿</div>
+      <div class="card-hint">사용 가능한 변수: <span class="token">{brand}</span> <span class="token">{sku}</span> <span class="token">{colorKr}</span> <span class="token">{mat}</span> <span class="token">{madeIn}</span> <span class="token">{importer}</span></div>
+      <div class="input-row"><textarea id="s_descTpl" style="min-height:100px" placeholder="브랜드: {brand}&#10;제품번호: {sku}&#10;색상: {colorKr}&#10;소재: {mat}&#10;원산지: {madeIn}&#10;수입사: {importer}"></textarea></div>
+    </div>
+
+    <div class="savebar">
+      <button class="btn-primary" onclick="saveSettings(); showStep(2)" style="margin:0">저장하고 다음 →</button>
+    </div>
+    <div class="savebar"><span class="msg" id="saveMsg1"></span></div>
+  </div>
+
+  <!-- STEP 2: 카테고리별 판매자특이사항/안내문구 -->
+  <div id="step2" style="display:none">
+    <div class="card">
+      <div class="card-title">카테고리별 안내문구</div>
+      <div class="card-hint">
+        여기 적은 문구는 스마트스토어 엑셀의 <b>'판매자특이사항'</b> 컬럼(고객에게 노출되는 필드)에 카테고리별로 자동 삽입됩니다.
+        직접 취급하는 상품의 소재·사이즈·관리방법 안내 등 사실에 기반한 내용만 넣으세요. 타 브랜드명을 검색 노출 목적으로 나열하는 방식은
+        상표권 분쟁 및 스마트스토어 정책 위반 소지가 있어 권장하지 않습니다.
+      </div>
+      <table class="tagtable">
+        <thead><tr><th>카테고리</th><th>안내문구</th></tr></thead>
+        <tbody id="tagRows"></tbody>
+      </table>
+      <div class="savebar">
+        <button class="btn-primary" onclick="saveTagMeta()" style="margin:0">문구 저장</button>
+        <span class="msg" id="saveMsg2"></span>
+      </div>
+    </div>
+    <button class="btn-secondary" onclick="showStep(1)">← 기본설정으로</button>
+    <button class="btn-secondary" onclick="showStep(3)">다음: 파일 업로드 →</button>
+  </div>
+
+  <!-- STEP 3: 파일 업로드 -->
+  <div id="step3" style="display:none">
+    <div class="card">
+      <div class="card-title">CSV / XLSX 업로드</div>
+      <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+        <div class="icon">📂</div>
+        <div class="title">파일을 탭하거나 드래그</div>
+        <div class="sub">공급사 B2B 카탈로그 CSV / XLSX</div>
+        <div class="sub" style="margin-top:4px;color:#C9A96E">※ XLS → XLSX(또는 CSV) 변환 후 업로드 권장</div>
+      </div>
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleFile(this)">
+    </div>
+
+    <div id="resultArea" style="display:none">
+      <div class="result-card">
+        <div class="result-title" id="resultTitle">파싱 결과</div>
+        <div class="result-list" id="resultList"></div>
+      </div>
+      <button class="btn-primary" id="downloadBtn" onclick="doDownload()">✦ 스마트스토어 엑셀 다운로드</button>
+    </div>
+
+    <button class="btn-secondary" onclick="showStep(1)">← 설정으로 돌아가기</button>
+  </div>
+
+  <!-- STEP 4: 완료 -->
+  <div id="step4" style="display:none">
+    <div class="done-card">
+      <div class="done-icon">✅</div>
+      <div class="done-title">다운로드 완료!</div>
+      <div class="done-steps">
+        ① 대표이미지 URL 확인<br>
+        ② 스마트스토어 → 상품 일괄등록<br>
+        ③ 파일 업로드 → 오류 확인 → 등록
+      </div>
+      <button onclick="reset()" style="margin-top:24px;background:#C9A96E;color:#fff;border:none;border-radius:10px;padding:12px 28px;font-size:14px;font-weight:700;cursor:pointer">새 파일 처리하기</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ============================================================
+// 네이버 스마트스토어 공개 카테고리 코드 / 원산지 코드 (범용, 브랜드 무관)
+// ============================================================
+const CATEGORY_MAP = {
+  "숄더백":50000639,"토트백":50000640,"크로스백":50000641,
+  "클러치백":50000642,"클러치":50000642,"파우치":50000643,
+  "여성백팩":50000644,"백팩":50000644,"에코백":50015340,
+  "힙색":50000645,
+  "남성숄더백":50000646,"남성토트백":50000647,"남성크로스백":50000648,
+  "남성클러치":50000649,"남성백팩":50000651,
+  "여성반지갑":50003982,"여성장지갑":50003984,"여성중지갑":50003983,
+  "지갑":50003984,"카드지갑":50000662,"남성반지갑":50003985,"남성장지갑":50003987,
+  "여성벨트":50000539,"벨트":50000539,"남성벨트":50003988,
+  "선글라스":50000554,
+  "스니커즈":50003822,"운동화":50003822,
+  "샌들":50000389,"뮬":50000389,"로퍼":50000387,"플랫":50000387,
+  "힐":50000388,"부츠":50000386,
+  "여성상의":50000251,"여성하의":50000252,"원피스":50000253,"여성아우터":50000254,
+  "남성상의":50000830,"남성하의":50000831,"남성아우터":50000832,
+  "키즈상의":50001379,"키즈하의":50001380,"키즈아우터":50001381,
+  "스카프":50004010,"머플러":50000565,
+};
+
+const ORIGIN_MAP = {
+  "ITALY":"0201038","이탈리아":"0201038",
+  "FRANCE":"0201013","프랑스":"0201013",
+  "UK":"0201049","UNITED KINGDOM":"0201049","영국":"0201049",
+  "SPAIN":"0201025","스페인":"0201025",
+  "PORTUGAL":"0201080","포르투갈":"0201080",
+  "GERMANY":"0201030","독일":"0201030",
+  "ROMANIA":"0201074","루마니아":"0201074",
+};
+
+const BRAND_KR_MAP = {
+  'SAINT LAURENT':'생로랑','CELINE':'셀린느','MONCLER':'몽클레르',
+  'BOTTEGA VENETA':'보테가베네타','GOLDEN GOOSE':'골든구스','LOEWE':'로에베',
+  'BURBERRY':'버버리','MAX MARA':'막스마라','MAX MARA THE CUBE':'막스마라더큐브',
+  'PRADA':'프라다','FENDI':'펜디','GUCCI':'구찌','MIU MIU':'미우미우',
+  'STONE ISLAND':'스톤아일랜드','VALENTINO':'발렌티노','BALENCIAGA':'발렌시아가',
+  'GIVENCHY':'지방시','OFF-WHITE':'오프화이트','PALM ANGELS':'팜앤젤스',
+  'JACQUEMUS':'자크뮈스','ROGER VIVIER':'로저비비에',"TOD'S":'토즈',
+  'MARNI':'마르니','JIL SANDER':'질샌더','ZIMMERMANN':'짐머만',
+};
+
+const COLOR_KR_MAP = {
+  'BLACK':'블랙','NERO':'블랙','BLK':'블랙',
+  'WHITE':'화이트','BIANCO':'화이트','OPTIC WHITE':'화이트',
+  'BROWN':'브라운','MARRONE':'브라운','FONDANT':'파운던트브라운',
+  'BEIGE':'베이지','SAND':'샌드베이지','CAMEL':'카멜',
+  'RED':'레드','ROSSO':'레드','BORDEAUX':'버건디','BAROLO':'바롤로버건디',
+  'BLUE':'블루','BLU':'블루','NAVY':'네이비','DARK BLUE':'다크블루',
+  'GREEN':'그린','VERDE':'그린',
+  'GREY':'그레이','GRAY':'그레이','GRIGIO':'그레이',
+  'PINK':'핑크','ROSA':'핑크','FUCHSIA':'퓨시아',
+  'YELLOW':'옐로우','GIALLO':'옐로우',
+  'GOLD':'골드','SILVER':'실버','CREAM':'크림',
+};
+
+// detectCategory가 실제로 반환할 수 있는 카테고리 전체 목록 (안내문구 관리용)
+const CATEGORY_LIST = [
+  '숄더백','토트백','크로스백','클러치백','여성백팩','힙색',
+  '스니커즈','샌들','뮬','부츠','로퍼','플랫','힐',
+  '여성벨트','선글라스','여성반지갑','카드지갑','스카프',
+  '키즈아우터','키즈상의','여성아우터','원피스','여성하의','여성상의',
+];
+const LUXURY_BAG_CATEGORIES = ['숄더백','토트백','크로스백','클러치백','여성백팩','힙색'];
+
+// ============================================================
+// 로컬 저장 (모두 이 브라우저 안에만 저장됩니다)
+// ============================================================
+const DEFAULT_SETTINGS = {
+  storeName:'', asPhone:'', importer:'', courier:'', shipMethod:'택배, 소포, 등기',
+  eurKrw:1450, shipping:0, dutyRate:8, vatRate:10, marginRate:15, ssRate:6,
+  hasDuty:true, hasLuxury:true, luxThreshold:2000000,
+  returnFee:50000, exchangeFee:100000,
+  mainImgTpl:'', subImgTpl:'',
+  descTpl:'브랜드: {brand}\n제품번호: {sku}\n색상: {colorKr}\n소재: {mat}\n원산지: {madeIn}\n수입사: {importer}',
+};
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem('sstool_settings');
+    return raw ? Object.assign({}, DEFAULT_SETTINGS, JSON.parse(raw)) : Object.assign({}, DEFAULT_SETTINGS);
+  } catch(e) { return Object.assign({}, DEFAULT_SETTINGS); }
+}
+
+function loadTagMeta() {
+  try {
+    const raw = localStorage.getItem('sstool_tagmeta');
+    return raw ? JSON.parse(raw) : {};
+  } catch(e) { return {}; }
+}
+
+let settings = loadSettings();
+let tagMeta = loadTagMeta();
+let state = { products: [] };
+
+function fillSettingsForm() {
+  document.getElementById('s_storeName').value = settings.storeName;
+  document.getElementById('s_asPhone').value = settings.asPhone;
+  document.getElementById('s_importer').value = settings.importer;
+  document.getElementById('s_courier').value = settings.courier;
+  document.getElementById('s_shipMethod').value = settings.shipMethod;
+  document.getElementById('s_eurKrw').value = settings.eurKrw;
+  document.getElementById('s_shipping').value = settings.shipping;
+  document.getElementById('s_dutyRate').value = settings.dutyRate;
+  document.getElementById('s_vatRate').value = settings.vatRate;
+  document.getElementById('s_marginRate').value = settings.marginRate;
+  document.getElementById('s_ssRate').value = settings.ssRate;
+  document.getElementById('s_luxThreshold').value = settings.luxThreshold;
+  document.getElementById('s_returnFee').value = settings.returnFee;
+  document.getElementById('s_exchangeFee').value = settings.exchangeFee;
+  document.getElementById('s_mainImgTpl').value = settings.mainImgTpl;
+  document.getElementById('s_subImgTpl').value = settings.subImgTpl;
+  document.getElementById('s_descTpl').value = settings.descTpl;
+  updateDutyUI();
+  updateLuxuryUI();
+}
+
+function saveSettings() {
+  settings = {
+    storeName: document.getElementById('s_storeName').value,
+    asPhone: document.getElementById('s_asPhone').value,
+    importer: document.getElementById('s_importer').value,
+    courier: document.getElementById('s_courier').value,
+    shipMethod: document.getElementById('s_shipMethod').value || '택배, 소포, 등기',
+    eurKrw: parseFloat(document.getElementById('s_eurKrw').value) || DEFAULT_SETTINGS.eurKrw,
+    shipping: parseFloat(document.getElementById('s_shipping').value) || 0,
+    dutyRate: parseFloat(document.getElementById('s_dutyRate').value) || 0,
+    vatRate: parseFloat(document.getElementById('s_vatRate').value) || 0,
+    marginRate: parseFloat(document.getElementById('s_marginRate').value) || 0,
+    ssRate: parseFloat(document.getElementById('s_ssRate').value) || 0,
+    hasDuty: state.hasDuty,
+    hasLuxury: state.hasLuxury,
+    luxThreshold: parseFloat(document.getElementById('s_luxThreshold').value) || DEFAULT_SETTINGS.luxThreshold,
+    returnFee: parseFloat(document.getElementById('s_returnFee').value) || 0,
+    exchangeFee: parseFloat(document.getElementById('s_exchangeFee').value) || 0,
+    mainImgTpl: document.getElementById('s_mainImgTpl').value,
+    subImgTpl: document.getElementById('s_subImgTpl').value,
+    descTpl: document.getElementById('s_descTpl').value,
+  };
+  localStorage.setItem('sstool_settings', JSON.stringify(settings));
+  const msg = document.getElementById('saveMsg1');
+  msg.textContent = '저장됨 ✓';
+  setTimeout(() => msg.textContent = '', 1500);
+}
+
+function buildTagRows() {
+  const tbody = document.getElementById('tagRows');
+  tbody.innerHTML = CATEGORY_LIST.map(cat => `
+    <tr>
+      <td class="catname">${cat}</td>
+      <td><textarea data-cat="${cat}">${(tagMeta[cat] || '').replace(/</g,'&lt;')}</textarea></td>
+    </tr>
+  `).join('');
+}
+
+function saveTagMeta() {
+  const areas = document.querySelectorAll('#tagRows textarea');
+  tagMeta = {};
+  areas.forEach(a => {
+    const v = a.value.trim();
+    if (v) tagMeta[a.dataset.cat] = v;
+  });
+  localStorage.setItem('sstool_tagmeta', JSON.stringify(tagMeta));
+  const msg = document.getElementById('saveMsg2');
+  msg.textContent = '저장됨 ✓';
+  setTimeout(() => msg.textContent = '', 1500);
+}
+
+// ============================================================
+// UI 제어
+// ============================================================
+function showStep(n) {
+  [1,2,3,4].forEach(i => {
+    document.getElementById('step'+i).style.display = i===n ? 'block' : 'none';
+    document.getElementById('step'+i+'-tab').className = 'step' + (i===n ? ' active' : '');
+  });
+}
+
+function toggleDuty() {
+  state.hasDuty = !state.hasDuty;
+  updateDutyUI();
+}
+function updateDutyUI() {
+  const t = document.getElementById('dutyToggle');
+  t.classList.toggle('on', state.hasDuty);
+}
+function toggleLuxury() {
+  state.hasLuxury = !state.hasLuxury;
+  updateLuxuryUI();
+}
+function updateLuxuryUI() {
+  const t = document.getElementById('luxuryToggle');
+  t.classList.toggle('on', state.hasLuxury);
+}
+
+function reset() {
+  state.products = [];
+  document.getElementById('resultArea').style.display = 'none';
+  document.getElementById('fileInput').value = '';
+  showStep(1);
+}
+
+// ============================================================
+// 카테고리 / 원산지 / 색상 / 브랜드 자동 감지
+// ============================================================
+function detectCategory(desc) {
+  const d = (desc || '').toLowerCase();
+  if (d.includes('clutch') || d.includes('pochette')) return '클러치백';
+  if (d.includes('backpack') || d.includes('zaino') || d.includes('rucksack')) return '여성백팩';
+  if (d.includes('cross') || d.includes('tracolla') || d.includes('crossbody')) return '크로스백';
+  if (d.includes('tote') || d.includes('shopper') || d.includes('cabas')) return '토트백';
+  if (d.includes('belt bag') || d.includes('beltbag') || d.includes('marsupio')) return '힙색';
+  if (d.includes('bag') || d.includes('borsa') || d.includes('hobo') || d.includes('bucket') || d.includes('sac ')) return '숄더백';
+  if (d.includes('sneaker') || d.includes('trainer') || d.includes('superstar')) return '스니커즈';
+  if (d.includes('sandal') || d.includes('sandalo') || d.includes('slingback')) return '샌들';
+  if (d.includes('mule') || d.includes('sabot') || d.includes('ciabatta') || d.includes('slider')) return '뮬';
+  if (d.includes('boot') || d.includes('stivale') || d.includes('stivaletto')) return '부츠';
+  if (d.includes('loafer') || d.includes('mocassin') || d.includes('mocassino')) return '로퍼';
+  if (d.includes('flat') || d.includes('ballerina') || d.includes('ballerine')) return '플랫';
+  if (d.includes('pump') || d.includes('heel') || d.includes('decollete')) return '힐';
+  if (d.includes('cintura') || d.includes('belt') || d.includes('ceinture')) return '여성벨트';
+  if (d.includes('occhiali') || d.includes('sunglass') || d.includes('lunette')) return '선글라스';
+  if (d.includes('portafogli') || d.includes('wallet') || d.includes('portefeuille')) return '여성반지갑';
+  if (d.includes('card') && (d.includes('holder') || d.includes('portacarte'))) return '카드지갑';
+  if (d.includes('scarf') || d.includes('foulard') || d.includes('stola') || d.includes('carre')) return '스카프';
+  if (d.includes('kid') || d.includes('bambino') || d.includes('bambina') || d.includes('child')) {
+    if (d.includes('jacket') || d.includes('coat') || d.includes('down') || d.includes('piumino')) return '키즈아우터';
+    return '키즈상의';
+  }
+  if (d.includes('jacket') || d.includes('giubbotto') || d.includes('piumino') || d.includes('down') || d.includes('coat') || d.includes('cappotto')) return '여성아우터';
+  if (d.includes('dress') || d.includes('abito') || d.includes('vestito')) return '원피스';
+  if (d.includes('pant') || d.includes('trouser') || d.includes('pantalone') || d.includes('skirt') || d.includes('gonna')) return '여성하의';
+  if (d.includes('t-shirt') || d.includes('polo') || d.includes('jersey') || d.includes('maglia') || d.includes('felpa') || d.includes('sweat') || d.includes('top') || d.includes('shirt') || d.includes('blouse')) return '여성상의';
+  return '숄더백';
+}
+
+function detectOrigin(madeIn) {
+  if (!madeIn) return '0201038';
+  const m = madeIn.toUpperCase();
+  for (const [key, val] of Object.entries(ORIGIN_MAP)) {
+    if (m.includes(key.toUpperCase())) return val;
+  }
+  return '0201038';
+}
+
+function detectColorKr(color) {
+  if (!color) return '';
+  const c = color.toUpperCase();
+  for (const [key, val] of Object.entries(COLOR_KR_MAP)) {
+    if (c.includes(key)) return val;
+  }
+  return color;
+}
+
+function detectBrandKr(brand) {
+  return BRAND_KR_MAP[(brand||'').toUpperCase()] || brand;
+}
+
+function applyTemplate(tpl, p, extra) {
+  if (!tpl) return '';
+  const skuL = (p.sku||'').toLowerCase().replace(/\s+/g,'');
+  const brandL = (p.brand||'').toLowerCase().replace(/\s+/g,'%20');
+  const vals = Object.assign({
+    sku: p.sku||'', sku_lower: skuL,
+    brand: p.brand||'', brand_lower: brandL,
+    color: p.color||'',
+    colorKr: detectColorKr(p.color),
+    mat: p.mat||'', madeIn: p.madeIn||'',
+    importer: settings.importer||'',
+  }, extra || {});
+  return tpl.replace(/\{(\w+)\}/g, (m, key) => vals[key] !== undefined ? vals[key] : m);
+}
+
+// ============================================================
+// 파일 파싱
+// ============================================================
+function parseRows(rows) {
+  const products = [];
+  for (const row of rows) {
+    const brand = (row['Brand'] || row['Designer'] || row['BRAND'] || row['brand'] || '').toString().trim().toUpperCase();
+    if (!brand) continue;
+
+    const desc = row['Descrizione'] || row['Description'] || row['Name'] || row['Modello'] || '';
+    const sku = row['Modello variante'] || row['SKU'] || row['Codice'] || row['Item Code'] || '';
+    const color = row['Colore'] || row['Color'] || row['COLOR'] || '';
+    const mat = row['Composizione'] || row['Composition'] || row['Materials'] || '';
+    const madeIn = row['Made In'] || row['MADE IN'] || row['Paese di produzione'] || row['Paese'] || row['Country'] || '';
+
+    let qty = 1;
+    for (const k of ['Quantità','Disponibilita','Qty','Stock','Quantity','Available','Disp.']) {
+      if (row[k] !== undefined && row[k] !== '' && row[k] !== null) {
+        const q = parseInt(row[k]);
+        if (!isNaN(q) && q > 0) { qty = q; break; }
+      }
+    }
+
+    function parsePrice(val) {
+      if (!val && val !== 0) return 0;
+      const p = parseFloat(String(val).replace(/[^0-9.]/g,''));
+      return isNaN(p) ? 0 : p;
+    }
+    let wholesale = 0;
+    for (const k of ['Prezzo Riferimento','Prezzo_Riferimento','WHOLESALE','Wholesale','Prezzo vendita','Price','PRICE','Final Price','price_eur','Unit Price']) {
+      if (row[k] !== undefined && row[k] !== '' && row[k] !== null) {
+        const p = parsePrice(row[k]);
+        if (p > 0) { wholesale = p; break; }
+      }
+    }
+    if (wholesale === 0) continue;
+
+    products.push({ brand, desc, sku: String(sku), color, mat, madeIn, qty, wholesale, costPrice: wholesale });
+  }
+  return products;
+}
+
+function calcPrice(costEur, s, isLuxuryBag) {
+  const base = costEur * s.eurKrw;
+  const duty = s.hasDuty ? base * (s.dutyRate / 100) : 0;
+  const taxable = base + duty;
+  let luxTax = 0, eduTax = 0;
+  if (isLuxuryBag && s.hasLuxury && taxable > s.luxThreshold) {
+    luxTax = (taxable - s.luxThreshold) * 0.20;
+    eduTax = luxTax * 0.30;
+  }
+  const vat = (taxable + luxTax + eduTax) * (s.vatRate / 100);
+  const total = taxable + luxTax + eduTax + vat;
+  const afterMargin = total * (1 + s.marginRate / 100);
+  const afterSS = afterMargin / (1 - s.ssRate / 100);
+  return Math.ceil(afterSS / 1000) * 1000;
+}
+
+function handleFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    let rows = [];
+    try {
+      const text = e.target.result;
+      if (typeof text === 'string') rows = parseCSV(text);
+    } catch(err) {
+      alert('파일 파싱 오류: ' + err.message + '\nCSV 형식으로 저장 후 다시 시도해주세요.');
+      return;
+    }
+    state.products = parseRows(rows);
+
+    const list = document.getElementById('resultList');
+    const title = document.getElementById('resultTitle');
+    title.textContent = `파싱 결과 — ${state.products.length}개`;
+    list.innerHTML = state.products.slice(0, 30).map(p => {
+      const cat = detectCategory(p.desc);
+      const isLuxury = LUXURY_BAG_CATEGORIES.includes(cat);
+      const price = calcPrice(p.costPrice + settings.shipping, settings, isLuxury);
+      return `<div class="result-item">
+        <span class="left">${detectBrandKr(p.brand)} ${detectColorKr(p.color)}<span class="cat">${cat}</span></span>
+        <span class="price">${price.toLocaleString()}원</span>
+      </div>`;
+    }).join('') + (state.products.length > 30 ? `<div style="color:#666;font-size:11px;padding:8px 0">... 외 ${state.products.length - 30}개</div>` : '');
+
+    document.getElementById('resultArea').style.display = 'block';
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+// ============================================================
+// 엑셀 생성
+// ============================================================
+function doDownload() {
+  const btn = document.getElementById('downloadBtn');
+  btn.disabled = true;
+  btn.textContent = '생성 중...';
+
+  try {
+    const s = settings;
+    const AS_INFO = `고객센터 ${s.asPhone} / 브랜드 공인 하자에 한해 처리 가능 / 수령 후 1일 이내 접수 필수`;
+
+    const h1 = ['상품 기본정보',...Array(24).fill(''),'상품 주요정보',...Array(8).fill(''),'배송정보',...Array(15).fill(''),'상품정보제공고시',...Array(4).fill(''),'A/S, 특이사항',...Array(3).fill(''),'할인/혜택정보',...Array(16).fill(''),'기타 정보',...Array(16).fill('')];
+    const h2 = [
+      '판매자 상품코드','카테고리코드','상품명','상품상태','판매가',
+      '단위가격 사용여부','표시용량','표시단위','총용량','부가세','관부가세','재고수량',
+      '옵션형태','옵션명','옵션값','옵션가','옵션 재고수량','직접입력 옵션',
+      '추가상품명','추가상품값','추가상품가','추가상품 재고수량',
+      '대표이미지','추가이미지','상세설명',
+      '브랜드','제조사','제조일자','유효일자','원산지코드','수입사',
+      '복수원산지여부','원산지 직접입력','미성년자 구매',
+      '배송비 템플릿코드','배송방법','택배사코드','배송비유형','기본배송비',
+      '배송비 결제방식','조건부무료-상품판매가 합계','수량별부과-수량','구간별-2구간수량',
+      '구간별-3구간수량','구간별-3구간배송비','구간별-추가배송비','반품배송비','교환배송비',
+      '지역별 차등 배송비','별도설치비',
+      '상품정보제공고시 템플릿코드','상품정보제공고시 품명','상품정보제공고시 모델명',
+      '상품정보제공고시 인증허가사항','상품정보제공고시 제조자',
+      'A/S 템플릿코드','A/S 전화번호','A/S 안내','판매자특이사항',
+      '즉시할인 값(기본할인)','즉시할인 단위(기본할인)','모바일 즉시할인 값','모바일 즉시할인 단위',
+      '복수구매할인 조건 값','복수구매할인 조건 단위','복수구매할인 값','복수구매할인 단위',
+      '상품구매시 포인트 지급 값','상품구매시 포인트 지급 단위',
+      '텍스트리뷰 작성시 지급 포인트','포토/동영상 리뷰 작성시 지급 포인트',
+      '한달사용 텍스트리뷰 작성시 지급 포인트','한달사용 포토/동영상리뷰 작성시 지급 포인트',
+      '알림받기동의 고객 리뷰 작성 시 지급 포인트','무이자 할부 개월','사은품',
+      '판매자바코드','구매평 노출여부','구매평 비노출사유','알림받기 동의 고객 전용 여부',
+      'ISBN','ISSN','독립출판','출간일','출판사','글작가','그림작가','번역자명','문화비 소득공제',
+      '사이즈 상품군','사이즈 사이즈명','사이즈 상세 사이즈','사이즈 모델명',
+    ];
+
+    const dataRows = state.products.map(p => {
+      const cat = detectCategory(p.desc);
+      const catCode = CATEGORY_MAP[cat] || 50000639;
+      const originCode = detectOrigin(p.madeIn);
+      const colorKr = detectColorKr(p.color);
+      const brandKr = detectBrandKr(p.brand);
+      const isLuxury = LUXURY_BAG_CATEGORIES.includes(cat);
+      const totalEur = p.costPrice + s.shipping;
+      const finalPrice = calcPrice(totalEur, s, isLuxury);
+
+      const productName = `${brandKr} ${cat} ${colorKr}`.trim().substring(0, 100);
+
+      const mainImg = applyTemplate(s.mainImgTpl, p);
+      const subImg = (s.subImgTpl||'').split(/\r?\n/).filter(Boolean).map(line => applyTemplate(line, p)).join('\n');
+      const descText = applyTemplate(s.descTpl, p);
+      const note = tagMeta[cat] || '';
+
+      const row = Array(93).fill('');
+      row[0] = `${(p.brand||'').substring(0,3)}_${p.sku.substring(0,15)}`;
+      row[1] = catCode;
+      row[2] = productName;
+      row[3] = '신상품';
+      row[4] = finalPrice;
+      row[9] = '과세상품';
+      row[10] = '관부가세 포함';
+      row[11] = p.qty;
+      row[22] = mainImg;
+      row[23] = subImg;
+      row[24] = descText;
+      row[25] = p.brand;
+      row[26] = p.brand;
+      row[29] = originCode;
+      row[30] = s.importer;
+      row[31] = 'N';
+      row[32] = p.madeIn || '';
+      row[35] = s.shipMethod;
+      row[36] = s.courier;
+      row[37] = '무료';
+      row[46] = s.returnFee;
+      row[47] = s.exchangeFee;
+      row[56] = s.asPhone;
+      row[57] = AS_INFO;
+      row[58] = note;
+      return row;
+    });
+
+    const today = new Date().toISOString().slice(0,10);
+    const fname = (s.storeName || '스마트스토어').replace(/[\\/:*?"<>|]/g,'');
+    downloadXLSX(h1, h2, dataRows, `${fname}_${today}.xlsx`);
+
+    showStep(4);
+  } catch(err) {
+    alert('오류: ' + err.message);
+    console.error(err);
+  }
+
+  btn.disabled = false;
+  btn.textContent = '✦ 스마트스토어 엑셀 다운로드';
+}
+
+// ============================================================
+// 초기화
+// ============================================================
+state.hasDuty = settings.hasDuty;
+state.hasLuxury = settings.hasLuxury;
+fillSettingsForm();
+buildTagRows();
+</script>
+</body>
+</html>
