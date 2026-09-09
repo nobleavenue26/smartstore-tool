@@ -669,21 +669,6 @@ function detectCategory(desc) {
   if (d.includes('t-shirt') || d.includes('polo') || d.includes('jersey') || d.includes('maglia') || d.includes('felpa') || d.includes('sweat') || d.includes('top') || d.includes('shirt') || d.includes('blouse')) return '여성상의';
   return '숄더백';
 }
-  if (d.includes('sneaker') || d.includes('trainer')) return '스니커즈';
-  if (d.includes('sandal') || d.includes('sandalo')) return '샌들';
-  if (d.includes('mule') || d.includes('sabot')) return '뮬';
-  if (d.includes('boot') || d.includes('stivale')) return '부츠';
-  if (d.includes('loafer') || d.includes('mocassin')) return '로퍼';
-  if (d.includes('flat') || d.includes('ballerina')) return '플랫';
-  if (d.includes('cintura') || d.includes('belt')) return '벨트';
-  if (d.includes('occhiali') || d.includes('sunglass')) return '선글라스';
-  if (d.includes('portafogli') || d.includes('wallet')) return '지갑';
-  if (d.includes('t-shirt') || d.includes('polo') || d.includes('maglia') || d.includes('shirt') || d.includes('jersey')) return '여성상의';
-  if (d.includes('pant') || d.includes('trouser') || d.includes('skirt')) return '여성하의';
-  if (d.includes('dress') || d.includes('abito')) return '원피스';
-  if (d.includes('jacket') || d.includes('giubbotto') || d.includes('coat') || d.includes('cappotto')) return '여성상의';
-  return '숄더백';
-}
 
 function detectOrigin(madeIn) {
   if (!madeIn) return '0201038';
