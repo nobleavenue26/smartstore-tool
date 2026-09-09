@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>런던루크 상품검색 · 거래처 인증</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; background: #F8F5F1; min-height: 100vh; padding: 20px 16px 60px; }
+.wrap { max-width: 720px; margin: 0 auto; }
+.header { text-align: center; margin-bottom: 20px; }
+.header h1 { font-size: 22px; font-weight: 800; color: #1A1A1A; letter-spacing: -1px; }
+.header p { font-size: 13px; color: #999; margin-top: 4px; }
+.header a { display: inline-block; margin-top: 8px; font-size: 11px; color: #B8893A; text-decoration: none; border-bottom: 1px solid #C9A96E; }
+.tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+.tab { flex: 1; text-align: center; padding: 12px; border-radius: 12px; font-size: 13px; font-weight: 700; background: #E0D9D0; color: #999; cursor: pointer; }
+.tab.active { background: #C9A96E; color: #fff; }
+.card { background: #fff; border-radius: 16px; padding: 20px; margin-bottom: 14px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+.card-title { font-size: 11px; font-weight: 700; color: #AAA; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; }
+.card-title .hint { text-transform: none; font-size: 10px; color: #C9A96E; letter-spacing: 0; font-weight: 500; }
+input[type=text], input[type=url], textarea, select {
+  width: 100%; border: 1.5px solid #E0D9D0; border-radius: 8px; padding: 10px 12px;
+  font-size: 14px; outline: none; background: #FAFAFA; font-family: inherit;
+}
+textarea { resize: vertical; min-height: 60px; }
+.field { margin-bottom: 10px; }
+.field label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.btn-primary { width: 100%; background: linear-gradient(135deg, #C9A96E, #A07840); color: #fff; border: none; border-radius: 12px; padding: 15px; font-size: 15px; font-weight: 700; cursor: pointer; }
+.btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+.btn-secondary { background: transparent; border: 1.5px solid #E0D9D0; color: #888; border-radius: 10px; padding: 9px 14px; font-size: 12px; cursor: pointer; }
+.btn-small { background: #FDF8F0; border: 1px solid #E0D9D0; color: #B8893A; border-radius: 8px; padding: 6px 10px; font-size: 11px; cursor: pointer; }
+.btn-danger { background: transparent; border: none; color: #C0524A; font-size: 11px; cursor: pointer; }
+.divider { height: 1px; background: #F0EDE8; margin: 14px 0; }
+.channel-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.channel-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1.5px solid #E0D9D0; border-radius: 10px; background: #FAFAFA; }
+.channel-item.disabled { opacity: .45; }
+.channel-item .info { flex: 1; min-width: 0; }
+.channel-item .name { font-size: 13px; font-weight: 700; color: #333; }
+.channel-item .tpl { font-size: 10px; color: #AAA; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.channel-item .tpl.empty { color: #C0524A; }
+.channel-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.icon-btn { width: 28px; height: 28px; border-radius: 8px; border: 1px solid #E0D9D0; background: #fff; cursor: pointer; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+.result-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.result-list a { text-decoration: none; }
+.chip { display: inline-block; padding: 9px 16px; border-radius: 20px; background: #1A1A1A; color: #C9A96E; font-size: 12px; font-weight: 700; }
+.chip.dim { background: #F0EDE8; color: #999; }
+.history { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.history span { background: #F0EDE8; color: #888; font-size: 11px; padding: 4px 10px; border-radius: 12px; cursor: pointer; }
+.info-box { background: #FDF8F0; border-radius: 8px; padding: 10px 14px; font-size: 11px; color: #B8893A; margin-bottom: 12px; line-height: 1.6; }
+.checklist { display: flex; flex-direction: column; gap: 10px; }
+.check-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px; border: 1.5px solid #E0D9D0; border-radius: 10px; cursor: pointer; }
+.check-row.checked { border-color: #C9A96E; background: #FDF8F0; }
+.check-row input { margin-top: 3px; flex-shrink: 0; width: 16px; height: 16px; }
+.check-row .ctext { flex: 1; }
+.check-row .ctext .t { font-size: 13px; font-weight: 700; color: #333; }
+.check-row .ctext .d { font-size: 11px; color: #999; margin-top: 2px; }
+.check-row .weight { font-size: 12px; font-weight: 700; color: #C9A96E; flex-shrink: 0; }
+.score-box { text-align: center; padding: 20px; border-radius: 16px; background: #1A1A1A; margin: 16px 0; }
+.score-box .num { font-size: 40px; font-weight: 800; color: #C9A96E; }
+.score-box .grade { font-size: 14px; font-weight: 700; margin-top: 6px; padding: 4px 14px; border-radius: 14px; display: inline-block; }
+.grade-approve { background: #2F6B3A; color: #fff; }
+.grade-hold { background: #A07840; color: #fff; }
+.grade-reject { background: #8A2E2E; color: #fff; }
+.vendor-card { border: 1.5px solid #E0D9D0; border-radius: 12px; padding: 14px; margin-bottom: 10px; }
+.vendor-card .top { display: flex; justify-content: space-between; align-items: center; }
+.vendor-card .vname { font-size: 14px; font-weight: 700; color: #333; }
+.vendor-card .vmeta { font-size: 11px; color: #999; margin-top: 3px; }
+.badge { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 10px; }
+.filter-row { display: flex; gap: 6px; margin-bottom: 12px; }
+.filter-btn { flex: 1; text-align: center; padding: 8px; border-radius: 10px; font-size: 12px; font-weight: 700; background: #F0EDE8; color: #999; cursor: pointer; }
+.filter-btn.active { background: #C9A96E; color: #fff; }
+.refs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.refs a { font-size: 11px; color: #B8893A; background: #FDF8F0; padding: 5px 10px; border-radius: 8px; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="header">
+    <h1>🔎 런던루크 상품검색 · 거래처 인증</h1>
+    <p>재고 통합 검색 &amp; 신규 거래처 검증 도구</p>
+    <a href="index.html">← 스마트스토어 등록 툴로 이동</a>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" id="tab1-btn" onclick="showTab(1)">① 상품 검색</div>
+    <div class="tab" id="tab2-btn" onclick="showTab(2)">② 거래처 인증</div>
+  </div>
+
+  <!-- TAB 1: 상품 검색 -->
+  <div id="tab1">
+    <div class="info-box">
+      품절 상품을 찾을 때 브랜드/모델명(또는 SKU)을 입력하고 <b>전체 열기</b>를 누르면, 등록해 둔 모든 거래처와 검색엔진을 새 탭으로 한 번에 엽니다. 팝업 차단 알림이 뜨면 "항상 허용"으로 설정해두세요.
+    </div>
+
+    <div class="card">
+      <div class="card-title">검색어</div>
+      <div class="grid2">
+        <div class="field"><label>브랜드</label><input type="text" id="qBrand" placeholder="예: CELINE"></div>
+        <div class="field"><label>모델명 / SKU / 키워드</label><input type="text" id="qKeyword" placeholder="예: Triomphe belt bag"></div>
+      </div>
+      <button class="btn-primary" onclick="openAll()">✦ 전체 열기</button>
+      <div class="history" id="historyList"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">검색 채널 <span class="hint">거래처/검색엔진 관리</span></div>
+      <div class="channel-list" id="channelList"></div>
+      <button class="btn-secondary" onclick="addChannel()">+ 거래처 추가</button>
+    </div>
+  </div>
+
+  <!-- TAB 2: 거래처 인증 -->
+  <div id="tab2" style="display:none">
+    <div class="info-box">
+      신규 거래처는 정식 거래 전 아래 체크리스트로 먼저 검증하세요. 80점 이상 <b>승인</b>, 60~79점 <b>보류(추가 확인)</b>, 60점 미만 <b>거절</b> 권장 기준입니다.
+      <div class="refs">
+        <a href="https://www.hometax.go.kr" target="_blank" rel="noopener">국세청 홈택스(사업자 상태조회)</a>
+        <a href="https://ec.europa.eu/taxation_customs/vies/" target="_blank" rel="noopener">EU VAT 검증(VIES)</a>
+        <a href="https://who.is" target="_blank" rel="noopener">도메인 WHOIS 조회</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">신규 거래처 정보</div>
+      <div class="grid2">
+        <div class="field"><label>상호명</label><input type="text" id="vName" placeholder="예: ABC Trading S.r.l."></div>
+        <div class="field"><label>국가</label><input type="text" id="vCountry" placeholder="예: Italy"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>웹사이트</label><input type="text" id="vSite" placeholder="https://..."></div>
+        <div class="field"><label>담당자 연락처</label><input type="text" id="vContact" placeholder="이메일 / WhatsApp 등"></div>
+      </div>
+      <div class="field"><label>취급 브랜드</label><input type="text" id="vBrands" placeholder="예: CELINE, PRADA, GUCCI"></div>
+      <div class="field"><label>비고</label><textarea id="vNote" placeholder="협상 조건, 첫 주문 결과 등 자유 메모"></textarea></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">검증 체크리스트</div>
+      <div class="checklist" id="checklist"></div>
+      <div class="score-box">
+        <div class="num" id="scoreNum">0</div>
+        <div class="grade" id="scoreGrade">점수 산출 전</div>
+      </div>
+      <button class="btn-primary" onclick="saveVerification()">저장하기</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">거래처 검증 이력 <span class="hint" id="vCount"></span></div>
+      <div class="filter-row">
+        <div class="filter-btn active" data-f="all" onclick="setFilter(this,'all')">전체</div>
+        <div class="filter-btn" data-f="approve" onclick="setFilter(this,'approve')">승인</div>
+        <div class="filter-btn" data-f="hold" onclick="setFilter(this,'hold')">보류</div>
+        <div class="filter-btn" data-f="reject" onclick="setFilter(this,'reject')">거절</div>
+      </div>
+      <div id="vendorRecords"></div>
+      <button class="btn-secondary" onclick="exportCSV()">CSV로 내보내기</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ============================================================
+// 공통 저장소
+// ============================================================
+const LS_CHANNELS = 'pst_channels_v1';
+const LS_HISTORY  = 'pst_history_v1';
+const LS_VENDORS  = 'pst_vendors_v1';
+
+function load(key, fallback) {
+  try { const v = JSON.parse(localStorage.getItem(key)); return v || fallback; }
+  catch(e) { return fallback; }
+}
+function save(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
+
+// ============================================================
+// TAB 전환
+// ============================================================
+function showTab(n) {
+  document.getElementById('tab1').style.display = n === 1 ? 'block' : 'none';
+  document.getElementById('tab2').style.display = n === 2 ? 'block' : 'none';
+  document.getElementById('tab1-btn').className = 'tab' + (n === 1 ? ' active' : '');
+  document.getElementById('tab2-btn').className = 'tab' + (n === 2 ? ' active' : '');
+}
+
+// ============================================================
+// TAB 1: 상품 검색
+// ============================================================
+const DEFAULT_CHANNELS = [
+  { name: 'Google 검색',    tpl: 'https://www.google.com/search?q={q}', enabled: true },
+  { name: 'Google 이미지',  tpl: 'https://www.google.com/search?tbm=isch&q={q}', enabled: true },
+  { name: 'Google 쇼핑',    tpl: 'https://www.google.com/search?tbm=shop&q={q}', enabled: true },
+  { name: '네이버 쇼핑',    tpl: 'https://search.shopping.naver.com/search/all?query={q}', enabled: true },
+  { name: 'Franz',   tpl: '', enabled: true },
+  { name: 'Leam',    tpl: '', enabled: true },
+  { name: 'Etique',  tpl: '', enabled: true },
+  { name: 'Giglio',  tpl: '', enabled: true },
+];
+
+let channels = load(LS_CHANNELS, null) || DEFAULT_CHANNELS.slice();
+if (!load(LS_CHANNELS, null)) save(LS_CHANNELS, channels);
+let history = load(LS_HISTORY, []);
+
+function renderChannels() {
+  const list = document.getElementById('channelList');
+  list.innerHTML = channels.map((c, i) => `
+    <div class="channel-item ${c.enabled ? '' : 'disabled'}">
+      <input type="checkbox" ${c.enabled ? 'checked' : ''} onchange="toggleChannel(${i})">
+      <div class="info">
+        <div class="name">${escapeHTML(c.name)}</div>
+        <div class="tpl ${c.tpl ? '' : 'empty'}">${c.tpl ? escapeHTML(c.tpl) : '검색 URL 미등록 — 연필 아이콘으로 등록 ({q}가 검색어 자리)'}</div>
+      </div>
+      <div class="channel-actions">
+        <div class="icon-btn" onclick="editChannel(${i})">✎</div>
+        <div class="icon-btn" onclick="removeChannel(${i})">✕</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function escapeHTML(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function toggleChannel(i) { channels[i].enabled = !channels[i].enabled; save(LS_CHANNELS, channels); renderChannels(); }
+
+function removeChannel(i) {
+  if (!confirm(`"${channels[i].name}" 채널을 삭제할까요?`)) return;
+  channels.splice(i, 1);
+  save(LS_CHANNELS, channels);
+  renderChannels();
+}
+
+function editChannel(i) {
+  const c = channels[i];
+  const name = prompt('채널 이름', c.name);
+  if (name === null) return;
+  const tpl = prompt('검색 URL 패턴 (검색어가 들어갈 위치에 {q} 입력)\n예: https://vendor-site.com/search?keyword={q}\n\n※ 해당 사이트에서 직접 검색해본 뒤, 주소창 URL에서 검색어 부분만 {q}로 바꿔 붙여넣으세요.', c.tpl || '');
+  if (tpl === null) return;
+  c.name = name.trim() || c.name;
+  c.tpl = tpl.trim();
+  save(LS_CHANNELS, channels);
+  renderChannels();
+}
+
+function addChannel() {
+  const name = prompt('새 거래처/채널 이름');
+  if (!name) return;
+  const tpl = prompt('검색 URL 패턴 (검색어 자리에 {q}) — 모르면 비워두고 나중에 연필 아이콘으로 등록', '');
+  channels.push({ name: name.trim(), tpl: (tpl || '').trim(), enabled: true });
+  save(LS_CHANNELS, channels);
+  renderChannels();
+}
+
+function currentQuery() {
+  const brand = document.getElementById('qBrand').value.trim();
+  const kw = document.getElementById('qKeyword').value.trim();
+  return [brand, kw].filter(Boolean).join(' ').trim();
+}
+
+function renderHistory() {
+  const el = document.getElementById('historyList');
+  el.innerHTML = history.map(h => `<span onclick="reuseHistory('${escapeHTML(h).replace(/'/g,"\\'")}')">${escapeHTML(h)}</span>`).join('');
+}
+
+function reuseHistory(q) {
+  const parts = q.split(' ');
+  document.getElementById('qBrand').value = parts[0] || '';
+  document.getElementById('qKeyword').value = parts.slice(1).join(' ');
+}
+
+function pushHistory(q) {
+  history = [q, ...history.filter(h => h !== q)].slice(0, 15);
+  save(LS_HISTORY, history);
+  renderHistory();
+}
+
+function openAll() {
+  const q = currentQuery();
+  if (!q) { alert('브랜드 또는 키워드를 입력해주세요.'); return; }
+  const enc = encodeURIComponent(q);
+  const targets = channels.filter(c => c.enabled && c.tpl);
+  if (targets.length === 0) { alert('열 수 있는 채널이 없습니다. 채널의 검색 URL을 먼저 등록해주세요.'); return; }
+  targets.forEach((c, idx) => {
+    setTimeout(() => {
+      window.open(c.tpl.replace('{q}', enc), '_blank');
+    }, idx * 120);
+  });
+  pushHistory(q);
+}
+
+// ============================================================
+// TAB 2: 거래처 인증
+// ============================================================
+const CHECKLIST = [
+  { key: 'biz_reg',   weight: 15, t: '사업자등록/영업허가 확인', d: '사업자등록증 또는 현지 영업허가 서류를 확인했다' },
+  { key: 'authentic', weight: 20, t: '정품 소싱 증빙 확보',     d: '브랜드 공식 인보이스·정품 인증서 등 소싱 경로를 확인했다' },
+  { key: 'reputation',weight: 15, t: '온라인 평판 조회',        d: '사기 피해 사례·블랙리스트 등록 여부를 검색으로 확인했다' },
+  { key: 'longevity', weight: 10, t: '운영 기간 1년 이상',      d: '도메인/사업 운영 기간이 1년 이상이다 (WHOIS 등으로 확인)' },
+  { key: 'reference', weight: 10, t: '거래 레퍼런스 확인',      d: '기존 거래처(레퍼런스) 최소 1곳의 평판을 확인했다' },
+  { key: 'payment',   weight: 10, t: '결제 조건 안전성',        d: '선입금 비율이 50% 이하이거나 에스크로 등 안전장치가 있다' },
+  { key: 'sample',    weight: 15, t: '소액 샘플 주문 검수 통과', d: '첫 소액 주문 상품을 실물로 받아 정품·품질을 확인했다' },
+  { key: 'comms',     weight: 5,  t: '커뮤니케이션 양호',       d: '문의 응답 속도와 태도가 신뢰할 만하다' },
+];
+
+let checkedState = {};
+
+function renderChecklist() {
+  const el = document.getElementById('checklist');
+  el.innerHTML = CHECKLIST.map(c => `
+    <label class="check-row ${checkedState[c.key] ? 'checked' : ''}" id="row-${c.key}">
+      <input type="checkbox" ${checkedState[c.key] ? 'checked' : ''} onchange="toggleCheck('${c.key}')">
+      <div class="ctext">
+        <div class="t">${c.t}</div>
+        <div class="d">${c.d}</div>
+      </div>
+      <div class="weight">${c.weight}점</div>
+    </label>
+  `).join('');
+  updateScore();
+}
+
+function toggleCheck(key) {
+  checkedState[key] = !checkedState[key];
+  document.getElementById('row-' + key).classList.toggle('checked', checkedState[key]);
+  updateScore();
+}
+
+function computeScore() {
+  return CHECKLIST.reduce((sum, c) => sum + (checkedState[c.key] ? c.weight : 0), 0);
+}
+
+function gradeOf(score) {
+  if (score >= 80) return { label: '승인', cls: 'grade-approve', key: 'approve' };
+  if (score >= 60) return { label: '보류 (추가 확인 필요)', cls: 'grade-hold', key: 'hold' };
+  return { label: '거절 권장', cls: 'grade-reject', key: 'reject' };
+}
+
+function updateScore() {
+  const score = computeScore();
+  const g = gradeOf(score);
+  document.getElementById('scoreNum').textContent = score;
+  const gradeEl = document.getElementById('scoreGrade');
+  gradeEl.textContent = g.label;
+  gradeEl.className = 'grade ' + g.cls;
+}
+
+let vendors = load(LS_VENDORS, []);
+let currentFilter = 'all';
+
+function saveVerification() {
+  const name = document.getElementById('vName').value.trim();
+  if (!name) { alert('상호명을 입력해주세요.'); return; }
+  const score = computeScore();
+  const g = gradeOf(score);
+  vendors.unshift({
+    id: Date.now(),
+    name,
+    country: document.getElementById('vCountry').value.trim(),
+    site: document.getElementById('vSite').value.trim(),
+    contact: document.getElementById('vContact').value.trim(),
+    brands: document.getElementById('vBrands').value.trim(),
+    note: document.getElementById('vNote').value.trim(),
+    score, grade: g.key, gradeLabel: g.label,
+    checked: Object.keys(checkedState).filter(k => checkedState[k]),
+    date: new Date().toISOString().slice(0, 10),
+  });
+  save(LS_VENDORS, vendors);
+
+  ['vName','vCountry','vSite','vContact','vBrands','vNote'].forEach(id => document.getElementById(id).value = '');
+  checkedState = {};
+  renderChecklist();
+  renderVendorRecords();
+  alert(`저장 완료 — ${name} (${score}점, ${g.label})`);
+}
+
+function setFilter(el, f) {
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  currentFilter = f;
+  renderVendorRecords();
+}
+
+function renderVendorRecords() {
+  document.getElementById('vCount').textContent = `총 ${vendors.length}건`;
+  const list = currentFilter === 'all' ? vendors : vendors.filter(v => v.grade === currentFilter);
+  const gradeClass = { approve: 'grade-approve', hold: 'grade-hold', reject: 'grade-reject' };
+  document.getElementById('vendorRecords').innerHTML = list.map(v => `
+    <div class="vendor-card">
+      <div class="top">
+        <div>
+          <div class="vname">${escapeHTML(v.name)}</div>
+          <div class="vmeta">${escapeHTML(v.country || '-')} · ${escapeHTML(v.brands || '-')} · ${v.date}</div>
+        </div>
+        <div>
+          <span class="badge ${gradeClass[v.grade]}">${v.score}점 · ${escapeHTML(v.gradeLabel)}</span>
+        </div>
+      </div>
+      ${v.note ? `<div class="vmeta" style="margin-top:8px">${escapeHTML(v.note)}</div>` : ''}
+      <div style="margin-top:10px;text-align:right">
+        <span class="btn-danger" onclick="deleteVendor(${v.id})">삭제</span>
+      </div>
+    </div>
+  `).join('') || `<div style="text-align:center;color:#BBB;font-size:12px;padding:20px 0">기록이 없습니다</div>`;
+}
+
+function deleteVendor(id) {
+  if (!confirm('이 기록을 삭제할까요?')) return;
+  vendors = vendors.filter(v => v.id !== id);
+  save(LS_VENDORS, vendors);
+  renderVendorRecords();
+}
+
+function exportCSV() {
+  if (vendors.length === 0) { alert('내보낼 기록이 없습니다.'); return; }
+  const headers = ['상호명','국가','웹사이트','연락처','취급브랜드','점수','등급','등록일','비고'];
+  const csvEsc = (s) => `"${String(s == null ? '' : s).replace(/"/g,'""')}"`;
+  const rows = vendors.map(v => [v.name, v.country, v.site, v.contact, v.brands, v.score, v.gradeLabel, v.date, v.note].map(csvEsc).join(','));
+  const csv = '\uFEFF' + [headers.map(csvEsc).join(','), ...rows].join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `거래처_인증기록_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ============================================================
+// 초기화
+// ============================================================
+renderChannels();
+renderHistory();
+renderChecklist();
+renderVendorRecords();
+</script>
+</body>
+</html>
