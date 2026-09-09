@@ -102,12 +102,13 @@ textarea { resize: vertical; min-height: 60px; }
         <div class="field"><label>브랜드</label><input type="text" id="qBrand" placeholder="예: CELINE"></div>
         <div class="field"><label>모델명 / SKU / 키워드</label><input type="text" id="qKeyword" placeholder="예: Triomphe belt bag"></div>
       </div>
-      <button class="btn-primary" onclick="openAll()">✦ 전체 열기</button>
+      <button class="btn-primary" onclick="openAll()">✦ 선택한 채널 열기</button>
+      <div style="text-align:center;font-size:11px;color:#AAA;margin-top:8px">한번에 너무 많이 열려 버벅이면, 아래 채널 목록에서 지금 필요 없는 항목의 체크를 해제하세요.</div>
       <div class="history" id="historyList"></div>
     </div>
 
     <div class="card">
-      <div class="card-title">검색 채널 <span class="hint">거래처/검색엔진 관리</span></div>
+      <div class="card-title">검색 채널 <span class="hint">거래처/검색엔진 관리 · 체크된 것만 열림</span></div>
       <div class="channel-list" id="channelList"></div>
       <button class="btn-secondary" onclick="addChannel()">+ 거래처 추가</button>
     </div>
@@ -309,7 +310,7 @@ function openAll() {
   targets.forEach((c, idx) => {
     setTimeout(() => {
       window.open(c.tpl.replace('{q}', enc), '_blank');
-    }, idx * 120);
+    }, idx * 500);
   });
   pushHistory(q);
 }
