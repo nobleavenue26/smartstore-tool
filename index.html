@@ -475,8 +475,8 @@ const CATEGORY_MAP = {
   "샌들":50003842,"뮬":50003847,
   "힐":50003830,"부츠":50004191,
   "원피스":50000807,"여성상의":50000803,"여성하의":50000810,
-  "여성재킷":50021360,"여성트렌치코트":50021419,"여성패딩":50021321,"여성니트":50021299,
-  "남성상의":50000830,"남성재킷":50021640,"남성트렌치코트":50021699,"남성패딩":50021739,"남성니트":50021579,
+  "여성재킷":50021360,"여성트렌치코트":50021419,"여성기타코트":50021479,"여성패딩":50021321,"여성니트":50021299,"여성베스트":50021441,
+  "남성상의":50000830,"남성재킷":50021640,"남성트렌치코트":50021699,"남성기타코트":50021779,"남성패딩":50021739,"남성니트":50021579,"남성베스트":50021759,
   "키즈상의":50000535,"키즈원피스":50000414,"키즈니트":50000409,
   "키즈바람막이":50000419,"키즈패딩":50000419,"키즈코트":50000420,
   "스카프":50004010,"머플러":50000565,
@@ -489,16 +489,16 @@ const SEO_GROUP = {
   "에코백":"에코백","여성벨트":"여성벨트","선글라스":"선글라스","스카프":"스카프",
   "여성반지갑":"여성지갑","여성장지갑":"여성지갑","카드지갑":"카드지갑","남성숄더백":"남성숄더백",
   "스니커즈":"스니커즈","로퍼":"플랫슈즈","플랫":"플랫슈즈","부츠":"부츠",
-  "여성상의":"티셔츠","여성재킷":"아우터","여성트렌치코트":"아우터","여성패딩":"점퍼패딩","여성니트":"니트",
-  "남성재킷":"남성자켓아우터","남성트렌치코트":"남성자켓아우터","남성패딩":"남성패딩점퍼",
+  "여성상의":"티셔츠","여성재킷":"아우터","여성트렌치코트":"아우터","여성기타코트":"아우터","여성패딩":"점퍼패딩","여성니트":"니트","여성베스트":"아우터",
+  "남성재킷":"남성자켓아우터","남성트렌치코트":"남성자켓아우터","남성기타코트":"남성자켓아우터","남성패딩":"남성패딩점퍼","남성베스트":"남성자켓아우터",
   "키즈상의":"키즈반팔티","키즈바람막이":"키즈바람막이","키즈패딩":"키즈패딩","키즈코트":"키즈코트",
   "키즈원피스":"아동복전체",
 };
 
 // 상품명에 넣을 카테고리 한글 표기 (SEO_GROUP 키와는 별개로 자연스러운 단어 사용)
 const TITLE_NAME = {
-  "여성재킷":"자켓","여성트렌치코트":"트렌치코트","여성패딩":"패딩","여성니트":"니트",
-  "남성재킷":"자켓","남성트렌치코트":"트렌치코트","남성패딩":"패딩",
+  "여성재킷":"자켓","여성트렌치코트":"트렌치코트","여성기타코트":"코트","여성패딩":"패딩","여성니트":"니트","여성베스트":"베스트",
+  "남성재킷":"자켓","남성트렌치코트":"트렌치코트","남성기타코트":"코트","남성패딩":"패딩","남성베스트":"베스트",
   "키즈바람막이":"바람막이","키즈패딩":"패딩","키즈코트":"코트","키즈상의":"반팔티",
   "여성상의":"티셔츠",
 };
@@ -728,13 +728,14 @@ function detectCategory(desc, mat) {
     return '키즈상의';
   }
 
-  // 아우터: 네이버 카테고리가 재킷/트렌치코트/패딩/니트로 세분화되어 있어
+  // 아우터: 네이버 카테고리가 재킷/트렌치코트/기타코트/패딩/니트/베스트로 세분화되어 있어
   // '아우터' 통합 카테고리가 존재하지 않음 — 소재/스타일 키워드로 세부 분류.
   if (d.includes('down') || d.includes('piumino') || d.includes('padded') || d.includes('imbottit')) return isMen ? '남성패딩' : '여성패딩';
   if (d.includes('trench')) return isMen ? '남성트렌치코트' : '여성트렌치코트';
-  if (d.includes('coat') || d.includes('cappotto')) return isMen ? '남성트렌치코트' : '여성트렌치코트';
-  if (d.includes('cardigan') || d.includes('knit') || d.includes('maglione') || d.includes('sweater') || d.includes('pullover')) return isMen ? '남성니트' : '여성니트';
-  if (d.includes('jacket') || d.includes('giubbotto')) return isMen ? '남성재킷' : '여성재킷';
+  if (d.includes('coat') || d.includes('cappotto') || d.includes('mantella')) return isMen ? '남성기타코트' : '여성기타코트';
+  if (d.includes('cardigan') || d.includes('knit') || d.includes('maglione') || d.includes('maglia') || d.includes('sweater') || d.includes('pullover')) return isMen ? '남성니트' : '여성니트';
+  if (d.includes('gilet') || d.includes('smanicato') || d.includes('vest') || d.includes('bodywarmer')) return isMen ? '남성베스트' : '여성베스트';
+  if (d.includes('jacket') || d.includes('giubbotto') || d.includes('giacca')) return isMen ? '남성재킷' : '여성재킷';
 
   if (d.includes('dress') || d.includes('abito') || d.includes('vestito')) return '원피스';
   if (d.includes('pant') || d.includes('trouser') || d.includes('pantalone') || d.includes('skirt') || d.includes('gonna')) return '여성하의';
@@ -903,13 +904,20 @@ function handleFile(input) {
 // ============================================================
 // 상품명용 검색 키워드 뽑기 (TAG_MAP 1순위 항목, 카테고리명과 겹치면 다음 항목)
 // ============================================================
-function topTagKeyword(group, excludeWord) {
+function topTagKeyword(group, excludeWord, forbidSubstrings) {
   const list = (TAG_MAP[group] || '').split(',').map(s => s.trim()).filter(Boolean);
   if (!excludeWord) return list[0] || '';
   // 그룹 1위 키워드가 실제 상품 스타일과 다르면(예: 트렌치코트인데 '트위드자켓') 제목에
   // 넣지 않는다 — 상품명과 실물이 어긋나면 네이버 어뷰징 판단 리스크가 있음.
   // 대신 카테고리명과 겹치는(포함/피포함) 키워드가 있으면 그것만 채택.
-  const related = list.find(w => w !== excludeWord && (w.includes(excludeWord) || excludeWord.includes(w)));
+  // forbidSubstrings: 코트인데 트렌치가 아닌 경우처럼, 더 구체적인 다른 스타일을
+  // 잘못 암시하는 단어(예: '트렌치')는 명시적으로 제외한다.
+  const forbid = forbidSubstrings || [];
+  const related = list.find(w =>
+    w !== excludeWord &&
+    (w.includes(excludeWord) || excludeWord.includes(w)) &&
+    !forbid.some(f => w.includes(f))
+  );
   return related || '';
 }
 
@@ -991,7 +999,9 @@ function doDownload() {
       // 상품명 SEO: 브랜드 + 카테고리 + 검색량 1위 태그 키워드 + 색상
       const group = SEO_GROUP[cat] || cat;
       const titleCat = TITLE_NAME[cat] || cat;
-      const seoKeyword = topTagKeyword(group, titleCat);
+      // '기타코트'(트렌치 아님)에 '트렌치코트' 키워드가 잘못 딸려 들어가는 것 방지
+      const forbid = (cat === '여성기타코트' || cat === '남성기타코트') ? ['트렌치'] : [];
+      const seoKeyword = topTagKeyword(group, titleCat, forbid);
       const productName = [brandKr, titleCat, seoKeyword, colorKr].filter(Boolean).join(' ').replace(/\s+/g, ' ').substring(0, 100);
 
       // 이미지 URL
