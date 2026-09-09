@@ -43,6 +43,12 @@ textarea { resize: vertical; min-height: 60px; }
 .icon-btn { width: 28px; height: 28px; border-radius: 8px; border: 1px solid #E0D9D0; background: #fff; cursor: pointer; font-size: 13px; display: flex; align-items: center; justify-content: center; }
 .result-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 .result-list a { text-decoration: none; }
+.upload-btn { display: block; width: 100%; text-align: center; border: 2px dashed #C9A96E; border-radius: 12px; padding: 16px; background: #FDF8F0; color: #B8893A; font-size: 13px; font-weight: 700; cursor: pointer; }
+.batch-nav { margin-top: 14px; padding: 14px; background: #FDF8F0; border-radius: 12px; }
+.batch-nav .progress { font-size: 11px; color: #B8893A; font-weight: 700; margin-bottom: 6px; }
+.batch-nav .current { font-size: 15px; font-weight: 700; color: #333; margin-bottom: 12px; }
+.batch-nav .nav-row { display: flex; gap: 8px; }
+.batch-nav .nav-row button { flex: 1; }
 .link-card { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; background: #1A1A1A; }
 .link-card .lc-info { flex: 1; min-width: 0; }
 .link-card .lc-name { font-size: 13px; font-weight: 700; color: #fff; }
@@ -113,6 +119,26 @@ textarea { resize: vertical; min-height: 60px; }
       <div style="text-align:center;font-size:11px;color:#AAA;margin-top:10px">위 버튼은 링크만 만들어줘요 — 원하는 것만 하나씩 눌러서 여세요 (한번에 하나씩 열리니 폰에서도 안 버벅입니다).</div>
       <button class="btn-secondary" style="width:100%;margin-top:10px" onclick="openAll()">전체 한번에 열기 (느릴 수 있음)</button>
       <div class="history" id="historyList"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">일괄 검색 <span class="hint">CSV 업로드로 여러 상품 순서대로 찾기</span></div>
+      <label class="upload-btn">
+        📂 CSV 파일 업로드
+        <input type="file" id="csvInput" accept=".csv" style="display:none" onchange="handleCSV(this)">
+      </label>
+      <div style="font-size:11px;color:#999;margin-top:8px;line-height:1.6">
+        첫 줄은 제목 줄로 인식해요. "브랜드"와 "모델명/키워드/SKU" 열이 있으면 자동으로 나눠 넣고, 없으면 각 줄의 첫 칸을 통째로 검색어로 씁니다.
+      </div>
+      <div class="batch-nav" id="batchNav" style="display:none">
+        <div class="progress" id="batchProgress"></div>
+        <div class="current" id="batchCurrent"></div>
+        <div class="nav-row">
+          <button class="btn-secondary" onclick="batchPrev()">← 이전</button>
+          <button class="btn-primary" style="padding:9px" onclick="batchGenerate()">🔗 이 상품 링크 만들기</button>
+          <button class="btn-secondary" onclick="batchNext()">다음 →</button>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -359,6 +385,88 @@ function openAll() {
     }, idx * 500);
   });
   pushHistory(q);
+}
+
+// ============================================================
+// CSV 일괄 검색
+// ============================================================
+function splitCSVLine(line) {
+  const result = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') { inQ = !inQ; }
+    else if (c === ',' && !inQ) { result.push(cur); cur = ''; }
+    else { cur += c; }
+  }
+  result.push(cur);
+  return result;
+}
+
+function parseCSVRows(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length === 0) return [];
+  const headers = splitCSVLine(lines[0]).map(h => h.trim().toLowerCase());
+  const brandIdx = headers.findIndex(h => ['브랜드', 'brand'].includes(h));
+  const kwIdx = headers.findIndex(h => ['모델명', '키워드', 'sku', 'keyword', 'model'].includes(h));
+  const hasHeaderMatch = brandIdx !== -1 || kwIdx !== -1;
+
+  const dataLines = hasHeaderMatch ? lines.slice(1) : lines;
+  return dataLines.map(line => {
+    const cells = splitCSVLine(line).map(c => c.trim());
+    if (hasHeaderMatch) {
+      return { brand: brandIdx !== -1 ? (cells[brandIdx] || '') : '', keyword: kwIdx !== -1 ? (cells[kwIdx] || '') : '' };
+    }
+    return { brand: '', keyword: cells.join(' ').trim() };
+  }).filter(r => r.brand || r.keyword);
+}
+
+let batchRows = [];
+let batchIndex = 0;
+
+function handleCSV(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    batchRows = parseCSVRows(e.target.result);
+    if (batchRows.length === 0) {
+      alert('CSV에서 검색어를 찾지 못했어요. 형식을 확인해주세요.');
+      return;
+    }
+    batchIndex = 0;
+    document.getElementById('batchNav').style.display = 'block';
+    renderBatch();
+  };
+  reader.readAsText(file, 'UTF-8');
+  input.value = '';
+}
+
+function renderBatch() {
+  const row = batchRows[batchIndex];
+  document.getElementById('batchProgress').textContent = `${batchIndex + 1} / ${batchRows.length}`;
+  document.getElementById('batchCurrent').textContent = [row.brand, row.keyword].filter(Boolean).join(' ');
+  document.getElementById('qBrand').value = row.brand;
+  document.getElementById('qKeyword').value = row.keyword;
+}
+
+function batchPrev() {
+  if (batchRows.length === 0) return;
+  batchIndex = (batchIndex - 1 + batchRows.length) % batchRows.length;
+  renderBatch();
+}
+
+function batchNext() {
+  if (batchRows.length === 0) return;
+  batchIndex = (batchIndex + 1) % batchRows.length;
+  renderBatch();
+}
+
+function batchGenerate() {
+  if (batchRows.length === 0) return;
+  renderBatch();
+  generateLinks();
+  document.getElementById('linkResults').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // ============================================================
