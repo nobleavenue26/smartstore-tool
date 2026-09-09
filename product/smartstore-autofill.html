@@ -434,6 +434,7 @@ const ORIGIN_MAP = {
   "PORTUGAL":"0201080","포르투갈":"0201080",
   "GERMANY":"0201030","독일":"0201030",
   "ROMANIA":"0201074","루마니아":"0201074",
+  "ARMENIA":"0201032","아르메니아":"0201032",
 };
 
 const BRAND_KR_MAP = {
@@ -715,7 +716,7 @@ function applyTemplate(tpl, p, extra) {
     brand: p.brand||'', brand_lower: brandL,
     color: p.color||'',
     colorKr: detectColorKr(p.color),
-    mat: p.mat||'', madeIn: p.madeIn||'', sizes: p.sizes||'',
+    mat: p.mat||'', madeIn: p.madeIn||'', sizes: (p.sizeList||[]).join('/'),
     importer: settings.importer||'',
   }, extra || {});
   return tpl.replace(/\{(\w+)\}/g, (m, key) => vals[key] !== undefined ? vals[key] : m);
@@ -737,7 +738,10 @@ function topTagKeyword(group, excludeWord, forbidSubstrings) {
 // 파일 파싱
 // ============================================================
 function parseRows(rows) {
-  const products = [];
+  // 공급사 원본은 사이즈별로 줄이 나뉘어 있는 경우가 많다. 브랜드+상품코드+색상 단위로
+  // 묶어서 상품 1개로 만들고, 사이즈는 네이버가 실제로 쓰는 '조합형 옵션'으로 모아둔다 —
+  // 그냥 여러 줄로 올리면 같은 상품이 중복 등록된다.
+  const groups = new Map();
   for (const row of rows) {
     const brand = (row['Brand'] || row['Designer'] || row['BRAND'] || row['brand'] || '').toString().trim().toUpperCase();
     if (!brand) continue;
@@ -750,7 +754,7 @@ function parseRows(rows) {
     const color = row['Colore'] || row['Color'] || row['COLOR'] || '';
     const mat = row['Composizione'] || row['Composition'] || row['Materials'] || '';
     const madeIn = row['Made In'] || row['MADE IN'] || row['Paese di produzione'] || row['Paese'] || row['Country'] || '';
-    const sizes = row['Taglie'] || row['Taglia'] || row['Size'] || '';
+    const sizeVal = (row['Taglia'] || row['Taglie'] || row['Size'] || '').toString().trim();
 
     let qty = 1;
     for (const k of ['Quantità','Disponibilita','Qty','Stock','Quantity','Available','Disp.']) {
@@ -774,8 +778,15 @@ function parseRows(rows) {
     }
     if (wholesale === 0) continue;
 
-    products.push({ brand, desc, productLabel: String(productLabel).trim(), sku: String(sku), color, mat, madeIn, sizes, qty, wholesale, costPrice: wholesale });
+    const key = `${brand}|||${sku}|||${color}`;
+    if (!groups.has(key)) {
+      groups.set(key, { brand, desc, productLabel: String(productLabel).trim(), sku: String(sku), color, mat, madeIn, wholesale, costPrice: wholesale, sizeList: [], qtyList: [] });
+    }
+    const g = groups.get(key);
+    if (sizeVal) { g.sizeList.push(sizeVal); g.qtyList.push(qty); }
+    else { g.qtyList.push(qty); }
   }
+  const products = Array.from(groups.values()).map(g => ({ ...g, qty: g.qtyList.reduce((a, b) => a + b, 0) || 1 }));
   return products;
 }
 
@@ -914,6 +925,15 @@ function doDownload() {
       row[9] = '과세상품';
       row[10] = '관부가세 포함';
       row[11] = p.qty;
+      // 사이즈별로 나뉘어 있던 원본을 상품 1개 + 조합형 옵션으로 합쳤다.
+      // 이 4개 컬럼이 비어있으면 등록이 반려된다.
+      if (p.sizeList.length > 1 || (p.sizeList.length === 1 && p.sizeList[0])) {
+        row[12] = '조합형';
+        row[13] = '사이즈';
+        row[14] = p.sizeList.join(',');
+        row[15] = p.sizeList.map(() => '0').join(',');
+        row[16] = p.qtyList.join(',');
+      }
       row[22] = mainImg;
       row[23] = subImg;
       row[24] = descText;
@@ -923,14 +943,22 @@ function doDownload() {
       row[30] = s.importer;
       row[31] = 'N';
       row[32] = p.madeIn || '';
+      row[33] = 'Y'; // 미성년자 구매 가능 — 비어있으면 등록이 반려된다.
       row[35] = s.shipMethod;
       row[36] = s.courier;
       row[37] = '무료';
       row[46] = s.returnFee;
       row[47] = s.exchangeFee;
+      // 상품정보제공고시 — 패션잡화/의류 카테고리는 이 4개도 필수다.
+      row[51] = [brandKr, p.productLabel, p.sku].filter(Boolean).join(' ');
+      row[52] = p.sku;
+      row[53] = '해당사항 없음';
+      row[54] = p.brand;
       row[56] = s.asPhone;
       row[57] = AS_INFO;
       row[58] = note;
+      row[76] = 'Y'; // 판매자바코드 없음 — 비어있으면 반려된다.
+      row[78] = 'N'; // 구매평 비노출사유 없음
       return row;
     });
 
