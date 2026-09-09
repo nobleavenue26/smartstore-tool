@@ -197,7 +197,7 @@ const DEFAULT_CHANNELS = [
   { name: 'Google 쇼핑',    tpl: 'https://www.google.com/search?tbm=shop&q={q}', enabled: true },
   { name: '네이버 쇼핑',    tpl: 'https://search.shopping.naver.com/search/all?query={q}', enabled: true },
   { name: 'Julian Fashion', tpl: 'https://www.julian-fashion.com/it-IT/products/search?searchKey={q}', enabled: true },
-  { name: 'Franz',   tpl: '', enabled: true },
+  { name: 'Franz',   tpl: 'https://franzkraler.com/en-eu/search?q={q}&options%5Bprefix%5D=last', enabled: true },
   { name: 'Leam',    tpl: '', enabled: true },
   { name: 'Etique',  tpl: '', enabled: true },
   { name: 'Giglio',  tpl: '', enabled: true },
@@ -206,11 +206,16 @@ const DEFAULT_CHANNELS = [
 let channels = load(LS_CHANNELS, null) || DEFAULT_CHANNELS.slice();
 if (!load(LS_CHANNELS, null)) save(LS_CHANNELS, channels);
 
-// 새로 추가된 기본 채널(예: 구글 렌즈)을 기존 사용자 목록에도 자동 반영 (직접 수정한 채널은 그대로 유지)
+// 새로 추가된 기본 채널을 기존 사용자 목록에도 자동 반영하고,
+// 아직 URL이 비어있던 채널은 새 기본값으로 채워줌 (직접 등록해둔 URL은 절대 덮어쓰지 않음)
 let channelsUpdated = false;
 DEFAULT_CHANNELS.forEach(dc => {
-  if (!channels.some(c => c.name === dc.name)) {
+  const existing = channels.find(c => c.name === dc.name);
+  if (!existing) {
     channels.push(Object.assign({}, dc));
+    channelsUpdated = true;
+  } else if (!existing.tpl && dc.tpl) {
+    existing.tpl = dc.tpl;
     channelsUpdated = true;
   }
 });
