@@ -801,6 +801,10 @@ function parseRows(rows) {
     // 성인/아동을 구분할 수 있게 desc 뒤에 붙여둔다 (detectCategory의 아동 키워드 감지에 사용됨).
     const settore = row['Settore'] || row['Sector'] || '';
     const desc = (row['Descrizione'] || row['Description'] || row['Name'] || row['Modello'] || '') + (settore ? ' ' + settore : '');
+    // 제품명(고유 스타일명) — SKU 코드나 소재 설명문과는 별개로, 공급사가 상품에 붙인
+    // 이름이 있으면 상품명(제목)에 넣는다. 카탈로그마다 컬럼명이 달라 흔한 후보를 모두 확인.
+    const productLabel = row['Product Name'] || row['ProductName'] || row['Nome Prodotto'] || row['Nome prodotto'] ||
+      row['Nome'] || row['Product'] || row['Model Name'] || row['제품명'] || row['모델명'] || row['상품명'] || '';
     const sku = row['Modello variante'] || row['SKU'] || row['Codice'] || row['LEAM CODE'] || row['Item Code'] || '';
     const color = row['Colore'] || row['Color'] || row['COLOR'] || '';
     const mat = row['Composizione'] || row['Composition'] || row['Materials'] || row['Soumission'] || '';
@@ -836,7 +840,7 @@ function parseRows(rows) {
     const markup = state.source === 'franz' ? (markupMap[brand] ?? 0) : 0;
     const costPrice = wholesale * (1 + markup);
 
-    products.push({ brand, desc, sku: String(sku), color, mat, madeIn, sizes, qty, wholesale, costPrice });
+    products.push({ brand, desc, productLabel: String(productLabel).trim(), sku: String(sku), color, mat, madeIn, sizes, qty, wholesale, costPrice });
   }
   return products;
 }
@@ -1002,7 +1006,8 @@ function doDownload() {
       // '기타코트'(트렌치 아님)에 '트렌치코트' 키워드가 잘못 딸려 들어가는 것 방지
       const forbid = (cat === '여성기타코트' || cat === '남성기타코트') ? ['트렌치'] : [];
       const seoKeyword = topTagKeyword(group, titleCat, forbid);
-      const productName = [brandKr, titleCat, seoKeyword, colorKr].filter(Boolean).join(' ').replace(/\s+/g, ' ').substring(0, 100);
+      // 공급사 카탈로그에 상품 고유명이 있으면(예: 'Maya', 'Chantilly') 카테고리 앞에 넣는다.
+      const productName = [brandKr, p.productLabel, titleCat, seoKeyword, colorKr].filter(Boolean).join(' ').replace(/\s+/g, ' ').substring(0, 100);
 
       // 이미지 URL
       const skuL = p.sku.toLowerCase().replace(/\s+/g,'');
