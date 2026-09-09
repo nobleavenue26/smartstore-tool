@@ -123,7 +123,10 @@ function colName(idx) {
 // ZIP 생성 (순수 JS)
 function makeZip(files) {
   // 간단한 ZIP 구현
-  const parts = [];
+  // ⚠️ chunks에는 Uint8Array를 "통째로" 밀어넣는다 — 예전 코드처럼 바이트 하나하나를
+  // parts.push(...bigArray)로 펼치면, 파일이 커질 때(대량등록 상품 수 많을 때)
+  // V8 인자 개수 한도를 넘어 "Maximum call stack size exceeded"로 다운로드가 깨졌다.
+  const chunks = [];
   const centralDir = [];
   let offset = 0;
 
@@ -159,7 +162,7 @@ function makeZip(files) {
     const dataBytes = str2bytes(content);
     const crc = crc32(dataBytes);
     const size = dataBytes.length;
-    const localHeader = [
+    const localHeaderMeta = new Uint8Array([
       0x50,0x4B,0x03,0x04, // signature
       0x14,0x00,           // version
       0x00,0x00,           // flags
@@ -171,22 +174,20 @@ function makeZip(files) {
       ...uint32le(size),
       ...uint16le(nameBytes.length),
       0x00,0x00,           // extra length
-      ...nameBytes,
-      ...dataBytes,
-    ];
+    ]);
     centralDir.push({
       name: nameBytes, nameLen: nameBytes.length,
       crc, size, offset,
     });
-    offset += localHeader.length;
-    parts.push(...localHeader);
+    offset += localHeaderMeta.length + nameBytes.length + dataBytes.length;
+    chunks.push(localHeaderMeta, nameBytes, dataBytes);
   }
 
   const cdOffset = offset;
   let cdSize = 0;
-  const cdParts = [];
+  const cdChunks = [];
   for (const e of centralDir) {
-    const cd = [
+    const cdMeta = new Uint8Array([
       0x50,0x4B,0x01,0x02,
       0x14,0x00,0x14,0x00,
       0x00,0x00,0x00,0x00,
@@ -199,13 +200,12 @@ function makeZip(files) {
       0x00,0x00,0x00,0x00,
       0x00,0x00,0x00,0x00,
       ...uint32le(e.offset),
-      ...e.name,
-    ];
-    cdParts.push(...cd);
-    cdSize += cd.length;
+    ]);
+    cdChunks.push(cdMeta, e.name);
+    cdSize += cdMeta.length + e.name.length;
   }
 
-  const eocd = [
+  const eocd = new Uint8Array([
     0x50,0x4B,0x05,0x06,
     0x00,0x00,0x00,0x00,
     ...uint16le(centralDir.length),
@@ -213,9 +213,17 @@ function makeZip(files) {
     ...uint32le(cdSize),
     ...uint32le(cdOffset),
     0x00,0x00,
-  ];
+  ]);
 
-  return new Uint8Array([...parts, ...cdParts, ...eocd]);
+  const allChunks = chunks.concat(cdChunks, [eocd]);
+  const totalLen = allChunks.reduce((sum, c) => sum + c.length, 0);
+  const result = new Uint8Array(totalLen);
+  let pos = 0;
+  for (const c of allChunks) {
+    result.set(c, pos);
+    pos += c.length;
+  }
+  return result;
 }
 
 function downloadXLSX(headers1, headers2, dataRows, filename) {
@@ -469,7 +477,7 @@ const CATEGORY_MAP = {
   "원피스":50000807,"여성상의":50000803,"여성하의":50000810,
   "여성재킷":50021360,"여성트렌치코트":50021419,"여성패딩":50021321,"여성니트":50021299,
   "남성상의":50000830,"남성재킷":50021640,"남성트렌치코트":50021699,"남성패딩":50021739,"남성니트":50021579,
-  "키즈상의":50000535,"키즈원피스":50000414,
+  "키즈상의":50000535,"키즈원피스":50000414,"키즈니트":50000409,
   "키즈바람막이":50000419,"키즈패딩":50000419,"키즈코트":50000420,
   "스카프":50004010,"머플러":50000565,
 };
@@ -680,8 +688,9 @@ function reset() {
 // ============================================================
 // 파싱 함수
 // ============================================================
-function detectCategory(desc) {
+function detectCategory(desc, mat) {
   const d = (desc || '').toLowerCase();
+  const m = (mat || '').toLowerCase();
   const isMen = /\buomo\b/.test(d) || /\bmen\b/.test(d);
 
   if (d.includes('clutch') || d.includes('pochette')) return '클러치백';
@@ -710,6 +719,12 @@ function detectCategory(desc) {
     if (d.includes('coat') || d.includes('cappotto') || d.includes('trench')) return '키즈코트';
     if (d.includes('jacket') || d.includes('giubbotto')) return '키즈패딩';
     if (d.includes('dress') || d.includes('abito') || d.includes('vestito')) return '키즈원피스';
+    // 상품설명이 비어있는 카탈로그(예: Franz Kraler 사이즈별 원본)를 위한 소재 기반 추정 —
+    // 정확도가 텍스트 설명 기반보다 낮으므로 결과 미리보기에서 확인 권장.
+    const hasWool = m.includes('wool') || m.includes('cashmere');
+    const hasOuter = m.includes('outer') || m.includes('hood') || m.includes('nylon') || m.includes('polyamide');
+    if (hasOuter) return '키즈패딩';
+    if (hasWool) return '키즈니트';
     return '키즈상의';
   }
 
@@ -781,12 +796,15 @@ function parseRows(rows) {
     const brand = (row['Brand'] || row['Designer'] || row['BRAND'] || row['brand'] || '').toString().trim().toUpperCase();
     if (!brand) continue;
 
-    // 설명/SKU
-    const desc = row['Descrizione'] || row['Description'] || row['Name'] || row['Modello'] || '';
+    // 설명/SKU — 상품설명이 비어있는 카탈로그는 '부문'(Settore: Bambino/Bambina 등)으로 최소한
+    // 성인/아동을 구분할 수 있게 desc 뒤에 붙여둔다 (detectCategory의 아동 키워드 감지에 사용됨).
+    const settore = row['Settore'] || row['Sector'] || '';
+    const desc = (row['Descrizione'] || row['Description'] || row['Name'] || row['Modello'] || '') + (settore ? ' ' + settore : '');
     const sku = row['Modello variante'] || row['SKU'] || row['Codice'] || row['LEAM CODE'] || row['Item Code'] || '';
     const color = row['Colore'] || row['Color'] || row['COLOR'] || '';
     const mat = row['Composizione'] || row['Composition'] || row['Materials'] || row['Soumission'] || '';
     const madeIn = row['Made In'] || row['MADE IN'] || row['Paese di produzione'] || row['Paese'] || row['Country'] || 'ITALY';
+    const sizes = row['Taglie'] || row['Taglia'] || row['Size'] || '';
 
     // 재고/수량
     let qty = 1;
@@ -817,7 +835,7 @@ function parseRows(rows) {
     const markup = state.source === 'franz' ? (markupMap[brand] ?? 0) : 0;
     const costPrice = wholesale * (1 + markup);
 
-    products.push({ brand, desc, sku: String(sku), color, mat, madeIn, qty, wholesale, costPrice });
+    products.push({ brand, desc, sku: String(sku), color, mat, madeIn, sizes, qty, wholesale, costPrice });
   }
   return products;
 }
@@ -868,7 +886,7 @@ function handleFile(input) {
     const title = document.getElementById('resultTitle');
     title.textContent = `파싱 결과 — ${state.products.length}개`;
     list.innerHTML = state.products.slice(0, 30).map(p => {
-      const cat = detectCategory(p.desc);
+      const cat = detectCategory(p.desc, p.mat);
       const isLuxury = ['숄더백','토트백','크로스백','클러치','파우치','백팩'].includes(cat);
       const price = calcPrice(p.costPrice + settings.shipping, settings, isLuxury);
       return `<div class="result-item">
@@ -903,7 +921,7 @@ function topTagKeyword(group, excludeWord) {
 function downloadTagSheet(products, filename) {
   const lines = [['판매자상품코드', '카테고리', '추천 태그(최대 10개, 복붙용)'].join(',')];
   products.forEach(p => {
-    const cat = detectCategory(p.desc);
+    const cat = detectCategory(p.desc, p.mat);
     const group = SEO_GROUP[cat] || cat;
     const tags = TAG_MAP[group] || '';
     const code = `${p.brand.substring(0,3)}_${p.sku.substring(0,15)}`;
@@ -961,7 +979,7 @@ function doDownload() {
     ];
 
     const dataRows = state.products.map(p => {
-      const cat = detectCategory(p.desc);
+      const cat = detectCategory(p.desc, p.mat);
       const catCode = CATEGORY_MAP[cat] || 50000639;
       const originCode = detectOrigin(p.madeIn);
       const colorKr = detectColorKr(p.color);
@@ -1013,7 +1031,8 @@ function doDownload() {
       }
 
       // 상세설명
-      const descText = `브랜드: ${p.brand}\n제품번호: ${p.sku}\n색상: ${colorKr}\n소재: ${p.mat}\n원산지: Made in ${p.madeIn || 'Italy'}\n수입사: ${si.importer}\n\n※ 유럽 현지 부티크 직소싱 정품입니다.\n※ 관부가세 포함 가격입니다.\n※ 단순변심 반품 시 해외 왕복 배송비(약 10만원) + 수입세금이 발생합니다.`;
+      const sizeLine = p.sizes ? `보유 사이즈: ${p.sizes}\n` : '';
+      const descText = `브랜드: ${p.brand}\n제품번호: ${p.sku}\n색상: ${colorKr}\n소재: ${p.mat}\n${sizeLine}원산지: Made in ${p.madeIn || 'Italy'}\n수입사: ${si.importer}\n\n※ 유럽 현지 부티크 직소싱 정품입니다.\n※ 관부가세 포함 가격입니다.\n※ 단순변심 반품 시 해외 왕복 배송비(약 10만원) + 수입세금이 발생합니다.`;
 
       const note = META_MAP[group] || '';
 
