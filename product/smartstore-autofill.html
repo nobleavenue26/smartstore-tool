@@ -100,7 +100,9 @@ function colName(idx) {
 }
 
 function makeZip(files) {
-  const parts = [];
+  // ⚠️ chunks에는 Uint8Array를 "통째로" 밀어넣는다 — 바이트 하나하나를 push(...bigArray)로
+  // 펼치면 파일이 커질 때(상품 수 많을 때) V8 인자 개수 한도를 넘어 다운로드가 깨진다.
+  const chunks = [];
   const centralDir = [];
   let offset = 0;
 
@@ -129,38 +131,42 @@ function makeZip(files) {
     const dataBytes = str2bytes(content);
     const crc = crc32(dataBytes);
     const size = dataBytes.length;
-    const localHeader = [
+    const localHeaderMeta = new Uint8Array([
       0x50,0x4B,0x03,0x04, 0x14,0x00, 0x00,0x00, 0x00,0x00, 0x00,0x00, 0x00,0x00,
       ...uint32le(crc), ...uint32le(size), ...uint32le(size),
       ...uint16le(nameBytes.length), 0x00,0x00,
-      ...nameBytes, ...dataBytes,
-    ];
+    ]);
     centralDir.push({ name: nameBytes, nameLen: nameBytes.length, crc, size, offset });
-    offset += localHeader.length;
-    parts.push(...localHeader);
+    offset += localHeaderMeta.length + nameBytes.length + dataBytes.length;
+    chunks.push(localHeaderMeta, nameBytes, dataBytes);
   }
 
   const cdOffset = offset;
   let cdSize = 0;
-  const cdParts = [];
+  const cdChunks = [];
   for (const e of centralDir) {
-    const cd = [
+    const cdMeta = new Uint8Array([
       0x50,0x4B,0x01,0x02, 0x14,0x00,0x14,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
       ...uint32le(e.crc), ...uint32le(e.size), ...uint32le(e.size),
       ...uint16le(e.nameLen), 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-      ...uint32le(e.offset), ...e.name,
-    ];
-    cdParts.push(...cd);
-    cdSize += cd.length;
+      ...uint32le(e.offset),
+    ]);
+    cdChunks.push(cdMeta, e.name);
+    cdSize += cdMeta.length + e.name.length;
   }
 
-  const eocd = [
+  const eocd = new Uint8Array([
     0x50,0x4B,0x05,0x06, 0x00,0x00,0x00,0x00,
     ...uint16le(centralDir.length), ...uint16le(centralDir.length),
     ...uint32le(cdSize), ...uint32le(cdOffset), 0x00,0x00,
-  ];
+  ]);
 
-  return new Uint8Array([...parts, ...cdParts, ...eocd]);
+  const allChunks = chunks.concat(cdChunks, [eocd]);
+  const totalLen = allChunks.reduce((sum, c) => sum + c.length, 0);
+  const result = new Uint8Array(totalLen);
+  let pos = 0;
+  for (const c of allChunks) { result.set(c, pos); pos += c.length; }
+  return result;
 }
 
 function downloadXLSX(headers1, headers2, dataRows, filename) {
@@ -174,6 +180,18 @@ function downloadXLSX(headers1, headers2, dataRows, filename) {
   };
   const zipData = makeZip(files);
   const blob = new Blob([zipData], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadCSV(rows, filename) {
+  const esc = s => `"${String(s).replace(/"/g,'""')}"`;
+  const text = rows.map(r => r.map(esc).join(',')).join('\r\n');
+  const blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -239,12 +257,12 @@ table.tagtable textarea { width: 100%; border: 1.5px solid #E0D9D0; border-radiu
 
   <div class="header">
     <h1>📦 스마트스토어 대량등록 자동화</h1>
-    <p>이미지 URL · 속성 · 판매자특이사항 자동채움 — 데이터는 브라우저 밖으로 나가지 않습니다</p>
+    <p>이미지 URL · 속성 · 태그 자동채움 — 데이터는 브라우저 밖으로 나가지 않습니다</p>
   </div>
 
   <div class="steps">
     <div class="step active" id="step1-tab" onclick="showStep(1)">① 기본설정</div>
-    <div class="step" id="step2-tab" onclick="showStep(2)">② 카테고리 문구</div>
+    <div class="step" id="step2-tab" onclick="showStep(2)">② 카테고리 태그</div>
     <div class="step" id="step3-tab" onclick="showStep(3)">③ 파일업로드</div>
     <div class="step" id="step4-tab" onclick="showStep(4)">④ 다운로드</div>
   </div>
@@ -268,6 +286,7 @@ table.tagtable textarea { width: 100%; border: 1.5px solid #E0D9D0; border-radiu
       <div class="input-row"><div class="input-label">부가세율 (%)</div><input type="number" id="s_vatRate"></div>
       <div class="input-row"><div class="input-label">마진율 (%)</div><input type="number" id="s_marginRate"></div>
       <div class="input-row"><div class="input-label">스마트스토어 수수료 (%)</div><input type="number" id="s_ssRate"></div>
+      <div class="card-hint" style="margin:6px 0 0">가격은 10,000원 단위로 올림 계산됩니다.</div>
       <div class="divider"></div>
       <div class="input-row">
         <div class="input-label">관세 적용</div>
@@ -292,7 +311,7 @@ table.tagtable textarea { width: 100%; border: 1.5px solid #E0D9D0; border-radiu
 
     <div class="card">
       <div class="card-title">상세설명 템플릿</div>
-      <div class="card-hint">사용 가능한 변수: <span class="token">{brand}</span> <span class="token">{sku}</span> <span class="token">{colorKr}</span> <span class="token">{mat}</span> <span class="token">{madeIn}</span> <span class="token">{importer}</span></div>
+      <div class="card-hint">사용 가능한 변수: <span class="token">{brand}</span> <span class="token">{sku}</span> <span class="token">{colorKr}</span> <span class="token">{mat}</span> <span class="token">{sizes}</span> <span class="token">{madeIn}</span> <span class="token">{importer}</span></div>
       <div class="input-row"><textarea id="s_descTpl" style="min-height:100px" placeholder="브랜드: {brand}&#10;제품번호: {sku}&#10;색상: {colorKr}&#10;소재: {mat}&#10;원산지: {madeIn}&#10;수입사: {importer}"></textarea></div>
     </div>
 
@@ -302,21 +321,22 @@ table.tagtable textarea { width: 100%; border: 1.5px solid #E0D9D0; border-radiu
     <div class="savebar"><span class="msg" id="saveMsg1"></span></div>
   </div>
 
-  <!-- STEP 2: 카테고리별 판매자특이사항/안내문구 -->
+  <!-- STEP 2: 카테고리별 태그 -->
   <div id="step2" style="display:none">
     <div class="card">
-      <div class="card-title">카테고리별 안내문구</div>
+      <div class="card-title">카테고리별 태그</div>
       <div class="card-hint">
-        여기 적은 문구는 스마트스토어 엑셀의 <b>'판매자특이사항'</b> 컬럼(고객에게 노출되는 필드)에 카테고리별로 자동 삽입됩니다.
-        직접 취급하는 상품의 소재·사이즈·관리방법 안내 등 사실에 기반한 내용만 넣으세요. 타 브랜드명을 검색 노출 목적으로 나열하는 방식은
-        상표권 분쟁 및 스마트스토어 정책 위반 소지가 있어 권장하지 않습니다.
+        기본값은 브랜드명·카테고리명이 들어가지 않은 일반 검색 키워드입니다(네이버 판매자 태그 규정에 맞춤, 최대 10개).
+        이 값은 <b>판매자특이사항</b>(엑셀, 고객 노출)과 <b>태그 참고 CSV</b>(Seller Center 검색설정에 수동 입력) 두 곳에 함께 쓰입니다.
+        직접 취급하는 상품에 맞게 자유롭게 수정하세요.
       </div>
       <table class="tagtable">
-        <thead><tr><th>카테고리</th><th>안내문구</th></tr></thead>
+        <thead><tr><th>카테고리</th><th>태그(쉼표로 구분)</th></tr></thead>
         <tbody id="tagRows"></tbody>
       </table>
       <div class="savebar">
-        <button class="btn-primary" onclick="saveTagMeta()" style="margin:0">문구 저장</button>
+        <button class="btn-primary" onclick="saveTagMeta()" style="margin:0">저장</button>
+        <button class="btn-secondary" style="margin:0;width:auto;padding:13px 16px" onclick="resetTagMeta()">기본값으로 초기화</button>
         <span class="msg" id="saveMsg2"></span>
       </div>
     </div>
@@ -354,9 +374,9 @@ table.tagtable textarea { width: 100%; border: 1.5px solid #E0D9D0; border-radiu
       <div class="done-icon">✅</div>
       <div class="done-title">다운로드 완료!</div>
       <div class="done-steps">
-        ① 대표이미지 URL 확인<br>
-        ② 스마트스토어 → 상품 일괄등록<br>
-        ③ 파일 업로드 → 오류 확인 → 등록
+        ① 등록용 엑셀 + 태그 참고 CSV 2개가 받아집니다<br>
+        ② 엑셀 → 스마트스토어 상품 일괄등록<br>
+        ③ 태그 CSV → 상품별 검색설정 태그에 복붙
       </div>
       <button onclick="reset()" style="margin-top:24px;background:#C9A96E;color:#fff;border:none;border-radius:10px;padding:12px 28px;font-size:14px;font-weight:700;cursor:pointer">새 파일 처리하기</button>
     </div>
@@ -366,26 +386,44 @@ table.tagtable textarea { width: 100%; border: 1.5px solid #E0D9D0; border-radiu
 
 <script>
 // ============================================================
-// 네이버 스마트스토어 공개 카테고리 코드 / 원산지 코드 (범용, 브랜드 무관)
+// 네이버 스마트스토어 공개 카테고리 코드 (2026-06 공식 마스터 기준 검증) / 원산지 코드
 // ============================================================
 const CATEGORY_MAP = {
   "숄더백":50000639,"토트백":50000640,"크로스백":50000641,
-  "클러치백":50000642,"클러치":50000642,"파우치":50000643,
-  "여성백팩":50000644,"백팩":50000644,"에코백":50015340,
-  "힙색":50000645,
+  "클러치백":50000642,"파우치":50000643,
+  "여성백팩":50000644,"에코백":50015340,"힙색":50000645,
   "남성숄더백":50000646,"남성토트백":50000647,"남성크로스백":50000648,
-  "남성클러치":50000649,"남성백팩":50000651,
-  "여성반지갑":50003982,"여성장지갑":50003984,"여성중지갑":50003983,
-  "지갑":50003984,"카드지갑":50000662,"남성반지갑":50003985,"남성장지갑":50003987,
-  "여성벨트":50000539,"벨트":50000539,"남성벨트":50003988,
+  "남성클러치":50000649,"남성백팩":50000651,"남성에코백":50015341,
+  "여성반지갑":50003982,"여성장지갑":50003984,"카드지갑":50000662,
+  "남성반지갑":50003985,"남성장지갑":50003987,
+  "여성벨트":50000539,"남성벨트":50003988,
   "선글라스":50000554,
-  "스니커즈":50003822,"운동화":50003822,
-  "샌들":50000389,"뮬":50000389,"로퍼":50000387,"플랫":50000387,
-  "힐":50000388,"부츠":50000386,
-  "여성상의":50000251,"여성하의":50000252,"원피스":50000253,"여성아우터":50000254,
-  "남성상의":50000830,"남성하의":50000831,"남성아우터":50000832,
-  "키즈상의":50001379,"키즈하의":50001380,"키즈아우터":50001381,
+  "스니커즈":50003822,"로퍼":50003818,"플랫":50003817,
+  "샌들":50003842,"뮬":50003847,"힐":50003830,"부츠":50004191,
+  "원피스":50000807,"여성상의":50000803,"여성하의":50000810,
+  "여성재킷":50021360,"여성트렌치코트":50021419,"여성기타코트":50021479,"여성패딩":50021321,"여성니트":50021299,"여성베스트":50021441,
+  "남성상의":50000830,"남성재킷":50021640,"남성트렌치코트":50021699,"남성기타코트":50021779,"남성패딩":50021739,"남성니트":50021579,"남성베스트":50021759,
+  "키즈상의":50000535,"키즈원피스":50000414,"키즈니트":50000409,
+  "키즈바람막이":50000419,"키즈패딩":50000419,"키즈코트":50000420,
   "스카프":50004010,"머플러":50000565,
+};
+
+// 카테고리코드(위)와 태그 사전 키(아래)를 분리 — 세부 코드가 달라도 태그는 같은
+// 그룹을 공유하는 경우가 많다.
+const SEO_GROUP = {
+  "숄더백":"숄더백","토트백":"토트백","크로스백":"크로스백","클러치백":"클러치백","파우치":"파우치",
+  "에코백":"에코백","여성벨트":"여성벨트","선글라스":"선글라스","스카프":"스카프",
+  "여성반지갑":"여성지갑","여성장지갑":"여성지갑","카드지갑":"카드지갑","남성숄더백":"남성숄더백",
+  "스니커즈":"스니커즈","로퍼":"플랫슈즈","플랫":"플랫슈즈","부츠":"부츠",
+  "여성상의":"티셔츠","여성재킷":"아우터","여성트렌치코트":"아우터","여성기타코트":"아우터","여성패딩":"점퍼패딩","여성니트":"니트","여성베스트":"아우터",
+  "남성재킷":"남성자켓아우터","남성트렌치코트":"남성자켓아우터","남성기타코트":"남성자켓아우터","남성패딩":"남성패딩점퍼","남성베스트":"남성자켓아우터",
+  "키즈상의":"키즈반팔티","키즈바람막이":"키즈바람막이","키즈패딩":"키즈패딩","키즈코트":"키즈코트","키즈원피스":"아동복전체",
+};
+
+const TITLE_NAME = {
+  "여성재킷":"자켓","여성트렌치코트":"트렌치코트","여성기타코트":"코트","여성패딩":"패딩","여성니트":"니트","여성베스트":"베스트",
+  "남성재킷":"자켓","남성트렌치코트":"트렌치코트","남성기타코트":"코트","남성패딩":"패딩","남성베스트":"베스트",
+  "키즈바람막이":"바람막이","키즈패딩":"패딩","키즈코트":"코트","키즈상의":"반팔티","여성상의":"티셔츠",
 };
 
 const ORIGIN_MAP = {
@@ -406,7 +444,7 @@ const BRAND_KR_MAP = {
   'STONE ISLAND':'스톤아일랜드','VALENTINO':'발렌티노','BALENCIAGA':'발렌시아가',
   'GIVENCHY':'지방시','OFF-WHITE':'오프화이트','PALM ANGELS':'팜앤젤스',
   'JACQUEMUS':'자크뮈스','ROGER VIVIER':'로저비비에',"TOD'S":'토즈',
-  'MARNI':'마르니','JIL SANDER':'질샌더','ZIMMERMANN':'짐머만',
+  'MARNI':'마르니','JIL SANDER':'질샌더','ZIMMERMANN':'짐머만','HERNO':'에르노',
 };
 
 const COLOR_KR_MAP = {
@@ -423,14 +461,38 @@ const COLOR_KR_MAP = {
   'GOLD':'골드','SILVER':'실버','CREAM':'크림',
 };
 
-// detectCategory가 실제로 반환할 수 있는 카테고리 전체 목록 (안내문구 관리용)
-const CATEGORY_LIST = [
-  '숄더백','토트백','크로스백','클러치백','여성백팩','힙색',
-  '스니커즈','샌들','뮬','부츠','로퍼','플랫','힐',
-  '여성벨트','선글라스','여성반지갑','카드지갑','스카프',
-  '키즈아우터','키즈상의','여성아우터','원피스','여성하의','여성상의',
-];
-const LUXURY_BAG_CATEGORIES = ['숄더백','토트백','크로스백','클러치백','여성백팩','힙색'];
+// ============================================================
+// 태그 기본값 (브랜드명/카테고리명 없이, 네이버 판매자 태그 규정에 맞춘 일반 키워드)
+// 사용자가 직접 편집·저장 가능 — 여기 값은 시작점일 뿐이다.
+// ============================================================
+const DEFAULT_TAG_MAP = {
+  "숄더백":"솔더백, 여성숄더백, 미니숄더백, 젤리백, 인트레치아토, 미니토트백, 가죽숄더백, 버킷백, 호보백, 반달백",
+  "토트백":"토트백, 라탄백, 바오바오백, 라피아백, 분크가방, 드래곤디퓨전, 더로우가방, 위빙토트백, 가죽토트백, 여름토트백",
+  "크로스백":"크로스백, 미니크로스백, 여성크로스백, 위빙백, 가죽크로스백, 미니백, 명품가방, 체인크로스백, 인트레치아토크로스백, 여성미니백",
+  "클러치백":"여성숄더백가방, 미니파우치백, 미니토트백, 여자친구선물, 명품가방, 미니크로스백, 명품클러치백, 파우치클러치, 위빙클러치, 가죽클러치백",
+  "파우치":"미니파우치백, 화장품파우치, 미니파우치, 이너백, 무인양품파우치, 보냉파우치, 키티파우치, 디올파우치, 메쉬파우치, 방수파우치",
+  "여성지갑":"여성지갑, 여성반지갑, 여성장지갑, 지갑, 반지갑, 장지갑, 여자지갑, 여자명품지갑, 미니지갑, 여자반지갑",
+  "카드지갑":"남자카드지갑, 남성카드지갑, 가죽카드지갑, 슬림카드지갑, 명함지갑, 남자명품지갑, 카드홀더남성, 미니지갑남성, 가죽명함지갑, 남성슬림지갑",
+  "남성숄더백":"남자숄더백, 남성숄더백, 남자가죽숄더백, 남성명품가방, 가죽숄더백, 남자크로스백, 남성데일리백, 남자출퇴근가방, 남성가방추천, 남자명품숄더백",
+  "여성벨트":"여성가죽벨트, 여자벨트, 원피스벨트, 체인벨트, 여자허리띠, 허리조절벨트, 여성소가죽벨트, 여성과배기벨트, 여성벨트추천, 가죽허리띠",
+  "스니커즈":"메리제인운동화, 운동화, 러닝화, 여성운동화, 런닝화, 여름운동화, 키높이운동화, 메리제인슈즈, 여성스니커즈, 스니커즈",
+  "플랫슈즈":"플랫슈즈, 여성로퍼, 젤리슈즈, 메리제인, 메리제인슈즈, 여성플랫슈즈, 로퍼, 여성단화, 망사신발, 메쉬플랫",
+  "부츠":"여성부츠, 앵클부츠, 첼시부츠, 여성숏부츠, 여성롱부츠, 스웨이드부츠, 가죽부츠, 여성가을부츠, 블로퍼, 여성겨울부츠",
+  "선글라스":"여성선글라스, 오버사이즈선글라스, 빅프레임선글라스, 아세테이트선글라스, 명품선글라스, 여름선글라스, 자외선차단선글라스, 트렌디선글라스, 데일리선글라스, 스퀘어선글라스",
+  "에코백":"에코백, 이미스에코백, 트레이더조에코백, 볼앤체인에코백, 명품에코백, 캔버스백, 미니에코백, 캉골에코백, 라쿠제트에코백, 여름에코백",
+  "스카프":"스카프, 여름스카프, 반다나스카프, 플리츠스카프, 여성여름스카프, 실크스카프, 명품스카프, 레이스스카프, 쁘띠스카프, 여름목스카프",
+  "티셔츠":"여성반팔티, 여성티셔츠, 레이스나시, 나시티, 여성나시, 여성반팔",
+  "아우터":"트위드자켓, 스웨이드자켓, 트렌치코트, 가죽자켓, 여성자켓, 뷔스티에, 후드집업, 여성패딩, 여성스웨이드자켓, 캐시미어코트",
+  "점퍼패딩":"바람막이, 여성스웨이드점퍼, 여성가을점퍼, 경량패딩, 야상점퍼, 스웨이드블루종, 여성점퍼, 여성구스다운",
+  "니트":"여성니트, 캐시미어니트, 여성스웨터, 울니트, 오버사이즈니트, 여성가디건, 크루넥니트, 브이넥니트, 여성터틀넥, 니트가디건",
+  "남성자켓아우터":"바람막이, 우비, 남성여름자켓, 남자가죽자켓, 후드집업, 남자무스탕, 남자바람막이, 가죽자켓, 남자패딩, 경량패딩",
+  "남성패딩점퍼":"경량패딩, 항공점퍼, 선풍기잠바, 선풍기점퍼, 스카잔, 패딩조끼, 남성자켓, 남자코트, 레인코트",
+  "키즈반팔티":"키즈반팔티, 키즈반팔, 아동반팔티, 키즈티셔츠, 유아티, 아동티셔츠, 키즈여름티, 주니어반팔티, 초등반팔티, 키즈여름옷",
+  "키즈바람막이":"키즈바람막이, 키즈후리스, 주니어바람막이, 여아바람막이, 키즈플리스",
+  "키즈패딩":"키즈패딩, 키즈경량패딩, 키즈롱패딩, 키즈구스다운, 여아패딩, 키즈다운, 키즈구스패딩, 역시즌키즈패딩, 아기패딩, 키즈역시즌패딩",
+  "키즈코트":"여아트렌치코트, 여아코트, 키즈코트, 아기트렌치코트, 유아트렌치코트, 어린이모직코트",
+  "아동복전체":"여아한복, 남아한복, 아기한복, 여아원피스, 패밀리룩, 유아발레복, 가족티, 여아드레스, 키즈롱패딩, 키즈패딩",
+};
 
 // ============================================================
 // 로컬 저장 (모두 이 브라우저 안에만 저장됩니다)
@@ -453,14 +515,15 @@ function loadSettings() {
 
 function loadTagMeta() {
   try {
-    const raw = localStorage.getItem('sstool_tagmeta');
-    return raw ? JSON.parse(raw) : {};
-  } catch(e) { return {}; }
+    const raw = localStorage.getItem('sstool_tagmeta_v2');
+    return raw ? Object.assign({}, DEFAULT_TAG_MAP, JSON.parse(raw)) : Object.assign({}, DEFAULT_TAG_MAP);
+  } catch(e) { return Object.assign({}, DEFAULT_TAG_MAP); }
 }
 
 let settings = loadSettings();
-let tagMeta = loadTagMeta();
+let tagMap = loadTagMeta();
 let state = { products: [] };
+const CATEGORY_LIST = Object.keys(DEFAULT_TAG_MAP);
 
 function fillSettingsForm() {
   document.getElementById('s_storeName').value = settings.storeName;
@@ -517,22 +580,28 @@ function buildTagRows() {
   tbody.innerHTML = CATEGORY_LIST.map(cat => `
     <tr>
       <td class="catname">${cat}</td>
-      <td><textarea data-cat="${cat}">${(tagMeta[cat] || '').replace(/</g,'&lt;')}</textarea></td>
+      <td><textarea data-cat="${cat}">${(tagMap[cat] || '').replace(/</g,'&lt;')}</textarea></td>
     </tr>
   `).join('');
 }
 
 function saveTagMeta() {
   const areas = document.querySelectorAll('#tagRows textarea');
-  tagMeta = {};
+  tagMap = {};
   areas.forEach(a => {
     const v = a.value.trim();
-    if (v) tagMeta[a.dataset.cat] = v;
+    if (v) tagMap[a.dataset.cat] = v;
   });
-  localStorage.setItem('sstool_tagmeta', JSON.stringify(tagMeta));
+  localStorage.setItem('sstool_tagmeta_v2', JSON.stringify(tagMap));
   const msg = document.getElementById('saveMsg2');
   msg.textContent = '저장됨 ✓';
   setTimeout(() => msg.textContent = '', 1500);
+}
+
+function resetTagMeta() {
+  tagMap = Object.assign({}, DEFAULT_TAG_MAP);
+  localStorage.removeItem('sstool_tagmeta_v2');
+  buildTagRows();
 }
 
 // ============================================================
@@ -545,22 +614,10 @@ function showStep(n) {
   });
 }
 
-function toggleDuty() {
-  state.hasDuty = !state.hasDuty;
-  updateDutyUI();
-}
-function updateDutyUI() {
-  const t = document.getElementById('dutyToggle');
-  t.classList.toggle('on', state.hasDuty);
-}
-function toggleLuxury() {
-  state.hasLuxury = !state.hasLuxury;
-  updateLuxuryUI();
-}
-function updateLuxuryUI() {
-  const t = document.getElementById('luxuryToggle');
-  t.classList.toggle('on', state.hasLuxury);
-}
+function toggleDuty() { state.hasDuty = !state.hasDuty; updateDutyUI(); }
+function updateDutyUI() { document.getElementById('dutyToggle').classList.toggle('on', state.hasDuty); }
+function toggleLuxury() { state.hasLuxury = !state.hasLuxury; updateLuxuryUI(); }
+function updateLuxuryUI() { document.getElementById('luxuryToggle').classList.toggle('on', state.hasLuxury); }
 
 function reset() {
   state.products = [];
@@ -572,9 +629,13 @@ function reset() {
 // ============================================================
 // 카테고리 / 원산지 / 색상 / 브랜드 자동 감지
 // ============================================================
-function detectCategory(desc) {
+function detectCategory(desc, mat) {
   const d = (desc || '').toLowerCase();
+  const m = (mat || '').toLowerCase();
+  const isMen = /\buomo\b/.test(d) || /\bmen\b/.test(d);
+
   if (d.includes('clutch') || d.includes('pochette')) return '클러치백';
+  if (d.includes('pouch') || d.includes('borsello') || d.includes('trousse') || d.includes('beauty case')) return '파우치';
   if (d.includes('backpack') || d.includes('zaino') || d.includes('rucksack')) return '여성백팩';
   if (d.includes('cross') || d.includes('tracolla') || d.includes('crossbody')) return '크로스백';
   if (d.includes('tote') || d.includes('shopper') || d.includes('cabas')) return '토트백';
@@ -592,14 +653,34 @@ function detectCategory(desc) {
   if (d.includes('portafogli') || d.includes('wallet') || d.includes('portefeuille')) return '여성반지갑';
   if (d.includes('card') && (d.includes('holder') || d.includes('portacarte'))) return '카드지갑';
   if (d.includes('scarf') || d.includes('foulard') || d.includes('stola') || d.includes('carre')) return '스카프';
-  if (d.includes('kid') || d.includes('bambino') || d.includes('bambina') || d.includes('child')) {
-    if (d.includes('jacket') || d.includes('coat') || d.includes('down') || d.includes('piumino')) return '키즈아우터';
+
+  if (d.includes('kid') || d.includes('bambino') || d.includes('bambina') || d.includes('child') || d.includes('junior')) {
+    if (d.includes('windbreaker') || d.includes('k-way') || d.includes('vento')) return '키즈바람막이';
+    if (d.includes('down') || d.includes('piumino') || d.includes('padded')) return '키즈패딩';
+    if (d.includes('coat') || d.includes('cappotto') || d.includes('trench')) return '키즈코트';
+    if (d.includes('jacket') || d.includes('giubbotto')) return '키즈패딩';
+    if (d.includes('dress') || d.includes('abito') || d.includes('vestito')) return '키즈원피스';
+    // 상품설명이 비어있는 카탈로그를 위한 소재 기반 추정 — 정확도가 낮으므로
+    // 결과 미리보기에서 확인 권장.
+    const hasWool = m.includes('wool') || m.includes('cashmere');
+    const hasOuter = m.includes('outer') || m.includes('hood') || m.includes('nylon') || m.includes('polyamide');
+    if (hasOuter) return '키즈패딩';
+    if (hasWool) return '키즈니트';
     return '키즈상의';
   }
-  if (d.includes('jacket') || d.includes('giubbotto') || d.includes('piumino') || d.includes('down') || d.includes('coat') || d.includes('cappotto')) return '여성아우터';
+
+  // 아우터: 네이버 카테고리가 재킷/트렌치코트/기타코트/패딩/니트/베스트로 세분화되어 있어
+  // '아우터' 통합 카테고리가 존재하지 않음 — 소재/스타일 키워드로 세부 분류.
+  if (d.includes('down') || d.includes('piumino') || d.includes('padded') || d.includes('imbottit')) return isMen ? '남성패딩' : '여성패딩';
+  if (d.includes('trench')) return isMen ? '남성트렌치코트' : '여성트렌치코트';
+  if (d.includes('coat') || d.includes('cappotto') || d.includes('mantella')) return isMen ? '남성기타코트' : '여성기타코트';
+  if (d.includes('cardigan') || d.includes('knit') || d.includes('maglione') || d.includes('maglia') || d.includes('sweater') || d.includes('pullover')) return isMen ? '남성니트' : '여성니트';
+  if (d.includes('gilet') || d.includes('smanicato') || d.includes('vest') || d.includes('bodywarmer')) return isMen ? '남성베스트' : '여성베스트';
+  if (d.includes('jacket') || d.includes('giubbotto') || d.includes('giacca')) return isMen ? '남성재킷' : '여성재킷';
+
   if (d.includes('dress') || d.includes('abito') || d.includes('vestito')) return '원피스';
   if (d.includes('pant') || d.includes('trouser') || d.includes('pantalone') || d.includes('skirt') || d.includes('gonna')) return '여성하의';
-  if (d.includes('t-shirt') || d.includes('polo') || d.includes('jersey') || d.includes('maglia') || d.includes('felpa') || d.includes('sweat') || d.includes('top') || d.includes('shirt') || d.includes('blouse')) return '여성상의';
+  if (d.includes('t-shirt') || d.includes('polo') || d.includes('jersey') || d.includes('maglia') || d.includes('felpa') || d.includes('sweat') || d.includes('top') || d.includes('shirt') || d.includes('blouse')) return isMen ? '남성상의' : '여성상의';
   return '숄더백';
 }
 
@@ -634,10 +715,22 @@ function applyTemplate(tpl, p, extra) {
     brand: p.brand||'', brand_lower: brandL,
     color: p.color||'',
     colorKr: detectColorKr(p.color),
-    mat: p.mat||'', madeIn: p.madeIn||'',
+    mat: p.mat||'', madeIn: p.madeIn||'', sizes: p.sizes||'',
     importer: settings.importer||'',
   }, extra || {});
   return tpl.replace(/\{(\w+)\}/g, (m, key) => vals[key] !== undefined ? vals[key] : m);
+}
+
+function topTagKeyword(group, excludeWord, forbidSubstrings) {
+  const list = (tagMap[group] || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!excludeWord) return list[0] || '';
+  const forbid = forbidSubstrings || [];
+  const related = list.find(w =>
+    w !== excludeWord &&
+    (w.includes(excludeWord) || excludeWord.includes(w)) &&
+    !forbid.some(f => w.includes(f))
+  );
+  return related || '';
 }
 
 // ============================================================
@@ -649,11 +742,15 @@ function parseRows(rows) {
     const brand = (row['Brand'] || row['Designer'] || row['BRAND'] || row['brand'] || '').toString().trim().toUpperCase();
     if (!brand) continue;
 
-    const desc = row['Descrizione'] || row['Description'] || row['Name'] || row['Modello'] || '';
+    const settore = row['Settore'] || row['Sector'] || '';
+    const desc = (row['Descrizione'] || row['Description'] || row['Name'] || row['Modello'] || '') + (settore ? ' ' + settore : '');
+    const productLabel = row['Product Name'] || row['ProductName'] || row['Nome Prodotto'] || row['Nome prodotto'] ||
+      row['Nome'] || row['Product'] || row['Model Name'] || row['제품명'] || row['모델명'] || row['상품명'] || '';
     const sku = row['Modello variante'] || row['SKU'] || row['Codice'] || row['Item Code'] || '';
     const color = row['Colore'] || row['Color'] || row['COLOR'] || '';
     const mat = row['Composizione'] || row['Composition'] || row['Materials'] || '';
     const madeIn = row['Made In'] || row['MADE IN'] || row['Paese di produzione'] || row['Paese'] || row['Country'] || '';
+    const sizes = row['Taglie'] || row['Taglia'] || row['Size'] || '';
 
     let qty = 1;
     for (const k of ['Quantità','Disponibilita','Qty','Stock','Quantity','Available','Disp.']) {
@@ -677,7 +774,7 @@ function parseRows(rows) {
     }
     if (wholesale === 0) continue;
 
-    products.push({ brand, desc, sku: String(sku), color, mat, madeIn, qty, wholesale, costPrice: wholesale });
+    products.push({ brand, desc, productLabel: String(productLabel).trim(), sku: String(sku), color, mat, madeIn, sizes, qty, wholesale, costPrice: wholesale });
   }
   return products;
 }
@@ -695,8 +792,10 @@ function calcPrice(costEur, s, isLuxuryBag) {
   const total = taxable + luxTax + eduTax + vat;
   const afterMargin = total * (1 + s.marginRate / 100);
   const afterSS = afterMargin / (1 - s.ssRate / 100);
-  return Math.ceil(afterSS / 1000) * 1000;
+  return Math.ceil(afterSS / 10000) * 10000;
 }
+
+const LUXURY_BAG_CATEGORIES = ['숄더백','토트백','크로스백','클러치백','파우치','여성백팩'];
 
 function handleFile(input) {
   const file = input.files[0];
@@ -717,7 +816,7 @@ function handleFile(input) {
     const title = document.getElementById('resultTitle');
     title.textContent = `파싱 결과 — ${state.products.length}개`;
     list.innerHTML = state.products.slice(0, 30).map(p => {
-      const cat = detectCategory(p.desc);
+      const cat = detectCategory(p.desc, p.mat);
       const isLuxury = LUXURY_BAG_CATEGORIES.includes(cat);
       const price = calcPrice(p.costPrice + settings.shipping, settings, isLuxury);
       return `<div class="result-item">
@@ -729,6 +828,21 @@ function handleFile(input) {
     document.getElementById('resultArea').style.display = 'block';
   };
   reader.readAsText(file, 'UTF-8');
+}
+
+// ============================================================
+// 태그 참고 시트 (판매자 태그, 최대 10개) — 대량등록 엑셀에는 태그 컬럼이
+// 없어서 별도 CSV로 뽑아준다. Seller Center 검색설정에 수동으로 붙여넣을 것.
+// ============================================================
+function downloadTagSheet(products, filename) {
+  const rows = [['판매자상품코드', '카테고리', '추천 태그(최대 10개, 복붙용)']];
+  products.forEach(p => {
+    const cat = detectCategory(p.desc, p.mat);
+    const group = SEO_GROUP[cat] || cat;
+    const code = `${(p.brand||'').substring(0,3)}_${p.sku.substring(0,15)}`;
+    rows.push([code, cat, tagMap[group] || '']);
+  });
+  downloadCSV(rows, filename);
 }
 
 // ============================================================
@@ -771,7 +885,7 @@ function doDownload() {
     ];
 
     const dataRows = state.products.map(p => {
-      const cat = detectCategory(p.desc);
+      const cat = detectCategory(p.desc, p.mat);
       const catCode = CATEGORY_MAP[cat] || 50000639;
       const originCode = detectOrigin(p.madeIn);
       const colorKr = detectColorKr(p.color);
@@ -780,12 +894,16 @@ function doDownload() {
       const totalEur = p.costPrice + s.shipping;
       const finalPrice = calcPrice(totalEur, s, isLuxury);
 
-      const productName = `${brandKr} ${cat} ${colorKr}`.trim().substring(0, 100);
+      const group = SEO_GROUP[cat] || cat;
+      const titleCat = TITLE_NAME[cat] || cat;
+      const forbid = (cat === '여성기타코트' || cat === '남성기타코트') ? ['트렌치'] : [];
+      const seoKeyword = topTagKeyword(group, titleCat, forbid);
+      const productName = [brandKr, p.productLabel, titleCat, seoKeyword, colorKr].filter(Boolean).join(' ').replace(/\s+/g, ' ').substring(0, 100);
 
       const mainImg = applyTemplate(s.mainImgTpl, p);
       const subImg = (s.subImgTpl||'').split(/\r?\n/).filter(Boolean).map(line => applyTemplate(line, p)).join('\n');
       const descText = applyTemplate(s.descTpl, p);
-      const note = tagMeta[cat] || '';
+      const note = tagMap[group] || '';
 
       const row = Array(93).fill('');
       row[0] = `${(p.brand||'').substring(0,3)}_${p.sku.substring(0,15)}`;
@@ -819,6 +937,7 @@ function doDownload() {
     const today = new Date().toISOString().slice(0,10);
     const fname = (s.storeName || '스마트스토어').replace(/[\\/:*?"<>|]/g,'');
     downloadXLSX(h1, h2, dataRows, `${fname}_${today}.xlsx`);
+    downloadTagSheet(state.products, `네이버_태그참고_${fname}_${today}.csv`);
 
     showStep(4);
   } catch(err) {
