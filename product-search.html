@@ -91,7 +91,9 @@ textarea { resize: vertical; min-height: 60px; }
   <!-- TAB 1: 상품 검색 -->
   <div id="tab1">
     <div class="info-box">
-      품절 상품을 찾을 때 브랜드/모델명(또는 SKU)을 입력하고 <b>전체 열기</b>를 누르면, 등록해 둔 모든 거래처와 검색엔진을 새 탭으로 한 번에 엽니다. 팝업 차단 알림이 뜨면 "항상 허용"으로 설정해두세요.
+      품절 상품을 찾을 때 브랜드/모델명(또는 SKU)을 입력하고 <b>전체 열기</b>를 누르면, 등록해 둔 모든 거래처와 검색엔진을 새 탭으로 한 번에 엽니다. 팝업 차단 알림이 뜨면 "항상 허용"으로 설정해두세요.<br><br>
+      <b>구글 렌즈</b>는 사진으로 찾는 방식이라 키워드로 자동 검색은 안 되고, 채널 목록의 "Google 렌즈" 탭을 열어 상품 사진을 직접 올리면 됩니다.<br>
+      <b>Franz/Leam/Etique/Giglio</b>는 로그인이 필요한 사이트라 검색 주소를 제가 미리 넣어둘 수 없어요 — 아래 채널 목록에서 연필(✎) 아이콘을 눌러 한 번만 등록해두시면 그다음부턴 자동으로 같이 열립니다.
     </div>
 
     <div class="card">
@@ -191,6 +193,7 @@ function showTab(n) {
 const DEFAULT_CHANNELS = [
   { name: 'Google 검색',    tpl: 'https://www.google.com/search?q={q}', enabled: true },
   { name: 'Google 이미지',  tpl: 'https://www.google.com/search?tbm=isch&q={q}', enabled: true },
+  { name: 'Google 렌즈(이미지 업로드)', tpl: 'https://lens.google.com/', enabled: true },
   { name: 'Google 쇼핑',    tpl: 'https://www.google.com/search?tbm=shop&q={q}', enabled: true },
   { name: '네이버 쇼핑',    tpl: 'https://search.shopping.naver.com/search/all?query={q}', enabled: true },
   { name: 'Franz',   tpl: '', enabled: true },
@@ -201,6 +204,17 @@ const DEFAULT_CHANNELS = [
 
 let channels = load(LS_CHANNELS, null) || DEFAULT_CHANNELS.slice();
 if (!load(LS_CHANNELS, null)) save(LS_CHANNELS, channels);
+
+// 새로 추가된 기본 채널(예: 구글 렌즈)을 기존 사용자 목록에도 자동 반영 (직접 수정한 채널은 그대로 유지)
+let channelsUpdated = false;
+DEFAULT_CHANNELS.forEach(dc => {
+  if (!channels.some(c => c.name === dc.name)) {
+    channels.push(Object.assign({}, dc));
+    channelsUpdated = true;
+  }
+});
+if (channelsUpdated) save(LS_CHANNELS, channels);
+
 let history = load(LS_HISTORY, []);
 
 function renderChannels() {
