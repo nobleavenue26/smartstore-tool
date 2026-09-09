@@ -41,10 +41,16 @@ textarea { resize: vertical; min-height: 60px; }
 .channel-item .tpl.empty { color: #C0524A; }
 .channel-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .icon-btn { width: 28px; height: 28px; border-radius: 8px; border: 1px solid #E0D9D0; background: #fff; cursor: pointer; font-size: 13px; display: flex; align-items: center; justify-content: center; }
-.result-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.result-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 .result-list a { text-decoration: none; }
-.chip { display: inline-block; padding: 9px 16px; border-radius: 20px; background: #1A1A1A; color: #C9A96E; font-size: 12px; font-weight: 700; }
-.chip.dim { background: #F0EDE8; color: #999; }
+.link-card { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; background: #1A1A1A; }
+.link-card .lc-info { flex: 1; min-width: 0; }
+.link-card .lc-name { font-size: 13px; font-weight: 700; color: #fff; }
+.link-card .lc-domain { font-size: 11px; color: #888; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-card .lc-badge { font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 10px; flex-shrink: 0; white-space: nowrap; }
+.link-card .lc-badge.auto { background: #2F6B3A; color: #fff; }
+.link-card .lc-badge.static { background: #4A4A4A; color: #ccc; }
+.link-card .lc-arrow { color: #C9A96E; font-size: 16px; flex-shrink: 0; }
 .history { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .history span { background: #F0EDE8; color: #888; font-size: 11px; padding: 4px 10px; border-radius: 12px; cursor: pointer; }
 .info-box { background: #FDF8F0; border-radius: 8px; padding: 10px 14px; font-size: 11px; color: #B8893A; margin-bottom: 12px; line-height: 1.6; }
@@ -307,6 +313,11 @@ function searchTargets() {
   return channels.filter(c => c.enabled && c.tpl);
 }
 
+function domainOf(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); }
+  catch(e) { return url; }
+}
+
 function generateLinks() {
   const q = currentQuery();
   if (!q) { alert('브랜드 또는 키워드를 입력해주세요.'); return; }
@@ -318,9 +329,20 @@ function generateLinks() {
     alert('열 수 있는 채널이 없습니다. 채널의 검색 URL을 먼저 등록해주세요.');
     return;
   }
-  container.innerHTML = targets.map(c =>
-    `<a href="${escapeHTML(c.tpl.replace('{q}', enc))}" target="_blank" rel="noopener"><span class="chip">${escapeHTML(c.name)}</span></a>`
-  ).join('');
+  container.innerHTML = targets.map(c => {
+    const url = c.tpl.replace('{q}', enc);
+    const isAuto = c.tpl.includes('{q}');
+    return `<a href="${escapeHTML(url)}" target="_blank" rel="noopener">
+      <div class="link-card">
+        <div class="lc-info">
+          <div class="lc-name">${escapeHTML(c.name)}</div>
+          <div class="lc-domain">${escapeHTML(domainOf(url))}</div>
+        </div>
+        <span class="lc-badge ${isAuto ? 'auto' : 'static'}">${isAuto ? '자동검색' : '홈 바로가기'}</span>
+        <span class="lc-arrow">›</span>
+      </div>
+    </a>`;
+  }).join('');
   pushHistory(q);
 }
 
