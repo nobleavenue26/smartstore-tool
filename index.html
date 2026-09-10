@@ -845,6 +845,13 @@ function parseRows(rows) {
     const madeIn = row['Made In'] || row['MADE IN'] || row['Paese di produzione'] || row['Paese'] || row['Country'] || 'ITALY';
     const sizeVal = (row['Taglia'] || row['Taglie'] || row['Size'] || '').toString().trim();
 
+    // Franz 이미지 코드 — 브랜드별 고정값이 아니라 시즌마다 바뀐다(DDDP/DDDQ/DDDR...).
+    // 원본 'Stagione' 컬럼 앞부분에 그 시즌의 실제 이미지 코드가 그대로 들어있으므로
+    // 브랜드 추측 테이블 대신 이걸 직접 읽어야 이미지 URL이 실제로 존재하는 파일을 가리킨다.
+    const stagione = row['Stagione'] || row['Season'] || '';
+    const imgCodeMatch = String(stagione).match(/^([A-Za-z0-9]+)/);
+    const imgCode = imgCodeMatch ? imgCodeMatch[1].toLowerCase() : '';
+
     // 재고/수량
     let qty = 1;
     for (const k of ['Quantità', 'Disponibilita', 'Qty', 'Stock', 'Quantity', 'Available', 'Disp.']) {
@@ -876,7 +883,7 @@ function parseRows(rows) {
 
     const key = `${brand}|||${sku}|||${color}`;
     if (!groups.has(key)) {
-      groups.set(key, { brand, desc, productLabel: String(productLabel).trim(), sku: String(sku), color, mat, madeIn, wholesale, costPrice, sizeList: [], qtyList: [] });
+      groups.set(key, { brand, desc, productLabel: String(productLabel).trim(), sku: String(sku), color, mat, madeIn, wholesale, costPrice, imgCode, sizeList: [], qtyList: [] });
     }
     const g = groups.get(key);
     if (sizeVal) { g.sizeList.push(sizeVal); g.qtyList.push(qty); }
@@ -1058,8 +1065,9 @@ function doDownload() {
       const brandL = p.brand.toLowerCase().replace(/\s+/g,'%20');
       let mainImg = '', subImg = '';
       if (state.source === 'franz') {
-        // 브랜드별 Franz 이미지 코드
-        const FRANZ_IMG_CODE = {
+        // 브랜드별 고정 이미지 코드는 시즌이 바뀌면 틀린 값이 된다(원본 'Stagione' 컬럼에서
+        // 직접 읽은 값을 최우선으로 쓰고, 그게 없는 카탈로그만 예전 추측 테이블로 대체).
+        const FRANZ_IMG_CODE_FALLBACK = {
           'saint%20laurent': 'dddq',
           'burberry': 'dddq',
           'celine': 'dddq',
@@ -1076,7 +1084,7 @@ function doDownload() {
           'valentino': 'dddr',
           'balenciaga': 'dddr',
         };
-        const imgCode = FRANZ_IMG_CODE[brandL] || 'dddq';
+        const imgCode = p.imgCode || FRANZ_IMG_CODE_FALLBACK[brandL] || 'dddq';
         const BASE_IMG = `https://franz.atelier-software.eu/public/foto/${imgCode}---${brandL}---${skuL}`;
         mainImg = `${BASE_IMG}.jpg`;
         subImg = [
