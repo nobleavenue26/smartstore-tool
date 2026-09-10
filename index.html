@@ -664,10 +664,17 @@ function reset() {
 // ============================================================
 // 카테고리 / 원산지 / 색상 / 브랜드 자동 감지
 // ============================================================
-function detectCategory(desc, mat) {
+function detectCategory(desc, mat, sizeList) {
   const d = (desc || '').toLowerCase();
   const m = (mat || '').toLowerCase();
   const isMen = /\buomo\b/.test(d) || /\bmen\b/.test(d);
+  // 상품설명이 비어있으면 끝까지 아무 키워드에도 안 걸려서 기본값(숄더백)으로 떨어지는데,
+  // 실제로는 자켓/코트/베스트 같은 의류인 경우가 많다 — 'UNICA'(단일 사이즈, 가방/액세서리)가
+  // 아닌 실제 옷 사이즈(40, 42, S, M...)가 있으면 최소한 가방류로는 잘못 분류하지 않게 막는다.
+  const hasClothingSize = (sizeList || []).some(s => {
+    const sv = String(s || '').trim().toUpperCase();
+    return sv && sv !== 'UNICA' && sv !== 'ONE SIZE' && sv !== 'OS';
+  });
 
   if (d.includes('clutch') || d.includes('pochette')) return '클러치백';
   if (d.includes('pouch') || d.includes('borsello') || d.includes('trousse') || d.includes('beauty case')) return '파우치';
@@ -716,6 +723,7 @@ function detectCategory(desc, mat) {
   if (d.includes('dress') || d.includes('abito') || d.includes('vestito')) return '원피스';
   if (d.includes('pant') || d.includes('trouser') || d.includes('pantalone') || d.includes('skirt') || d.includes('gonna')) return '여성하의';
   if (d.includes('t-shirt') || d.includes('polo') || d.includes('jersey') || d.includes('maglia') || d.includes('felpa') || d.includes('sweat') || d.includes('top') || d.includes('shirt') || d.includes('blouse')) return isMen ? '남성상의' : '여성상의';
+  if (hasClothingSize) return isMen ? '남성재킷' : '여성재킷';
   return '숄더백';
 }
 
@@ -861,7 +869,7 @@ function handleFile(input) {
     const title = document.getElementById('resultTitle');
     title.textContent = `파싱 결과 — ${state.products.length}개`;
     list.innerHTML = state.products.slice(0, 30).map(p => {
-      const cat = detectCategory(p.desc, p.mat);
+      const cat = detectCategory(p.desc, p.mat, p.sizeList);
       const isLuxury = LUXURY_BAG_CATEGORIES.includes(cat);
       const price = calcPrice(p.costPrice + settings.shipping, settings, isLuxury);
       return `<div class="result-item">
@@ -882,7 +890,7 @@ function handleFile(input) {
 function downloadTagSheet(products, filename) {
   const rows = [['판매자상품코드', '카테고리', '추천 태그(최대 10개, 복붙용)']];
   products.forEach(p => {
-    const cat = detectCategory(p.desc, p.mat);
+    const cat = detectCategory(p.desc, p.mat, p.sizeList);
     const group = SEO_GROUP[cat] || cat;
     const code = `${(p.brand||'').substring(0,3)}_${p.sku.substring(0,15)}`;
     rows.push([code, cat, tagMap[group] || '']);
@@ -930,7 +938,7 @@ function doDownload() {
     ];
 
     const dataRows = state.products.map(p => {
-      const cat = detectCategory(p.desc, p.mat);
+      const cat = detectCategory(p.desc, p.mat, p.sizeList);
       const catCode = CATEGORY_MAP[cat] || 50000639;
       const originCode = detectOrigin(p.madeIn);
       const colorKr = detectColorKr(p.color);
