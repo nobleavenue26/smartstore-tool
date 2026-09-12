@@ -60,6 +60,19 @@ textarea { resize: vertical; min-height: 60px; }
 .history { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .history span { background: #F0EDE8; color: #888; font-size: 11px; padding: 4px 10px; border-radius: 12px; cursor: pointer; }
 .info-box { background: #FDF8F0; border-radius: 8px; padding: 10px 14px; font-size: 11px; color: #B8893A; margin-bottom: 12px; line-height: 1.6; }
+.diag-item { display: flex; gap: 10px; padding: 12px; border: 1.5px solid #E0D9D0; border-radius: 10px; margin-bottom: 8px; }
+.diag-item .diag-icon { font-size: 16px; flex-shrink: 0; }
+.diag-item .diag-body { flex: 1; }
+.diag-item .diag-title { font-size: 13px; font-weight: 700; color: #333; }
+.diag-item .diag-tip { font-size: 12px; color: #777; margin-top: 3px; line-height: 1.5; }
+.diag-item.pass { border-color: #B7D3B9; background: #F5FAF5; }
+.diag-item.warn { border-color: #E8CFA0; background: #FDF8F0; }
+.diag-item.fail { border-color: #E8B3AE; background: #FDF3F2; }
+.diag-item.info { border-color: #D7D2E8; background: #F7F5FC; }
+.diag-summary { display: flex; gap: 10px; margin: 14px 0; }
+.diag-summary .box { flex: 1; text-align: center; padding: 14px 8px; border-radius: 12px; background: #1A1A1A; }
+.diag-summary .box .num { font-size: 26px; font-weight: 800; color: #C9A96E; }
+.diag-summary .box .lbl { font-size: 10px; color: #999; margin-top: 4px; }
 .checklist { display: flex; flex-direction: column; gap: 10px; }
 .check-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px; border: 1.5px solid #E0D9D0; border-radius: 10px; cursor: pointer; }
 .check-row.checked { border-color: #C9A96E; background: #FDF8F0; }
@@ -212,13 +225,47 @@ textarea { resize: vertical; min-height: 60px; }
     </div>
 
     <div class="card">
-      <div class="card-title">상품 최적화 체크리스트</div>
-      <div class="checklist" id="seoChecklist"></div>
-      <div class="score-box">
-        <div class="num" id="seoScoreNum">0</div>
-        <div class="grade" id="seoScoreGrade">점수 산출 전</div>
+      <div class="card-title">상품 진단 <span class="hint">실제 값을 넣으면 자동 계산</span></div>
+      <div class="field"><label>상품명 전체</label><textarea id="dTitle" placeholder="예: 몽클레르 여성 숏패딩 후드 블랙 시에스타"></textarea></div>
+      <div class="grid2">
+        <div class="field"><label>검색 태그 (콤마로 구분)</label><input type="text" id="dTags" placeholder="예: 여성패딩, 숏패딩, 겨울아우터, ..."></div>
+        <div class="field"><label>이미지 개수</label><input type="number" id="dImages" placeholder="예: 6"></div>
       </div>
-      <button class="btn-primary" onclick="saveSeoCheck()">저장하기</button>
+      <div class="grid2">
+        <div class="field"><label>내 판매가 (원)</label><input type="number" id="dPrice" placeholder="예: 1890000"></div>
+        <div class="field"><label>동일상품 최저가 (원, 모르면 비움)</label><input type="number" id="dLowest" placeholder="예: 1750000"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>현재 리뷰 수</label><input type="number" id="dReviews" placeholder="예: 3"></div>
+        <div class="field"><label>등록 후 경과일</label><input type="number" id="dDays" placeholder="예: 14"></div>
+      </div>
+      <div class="check-row" id="dCategoryRow" onclick="toggleDiagFlag('dCategory')">
+        <input type="checkbox" onclick="event.stopPropagation()" onchange="toggleDiagFlag('dCategory')">
+        <div class="ctext"><div class="t">카테고리가 상품과 정확히 일치한다</div></div>
+      </div>
+      <div class="check-row" id="dDetailRow" onclick="toggleDiagFlag('dDetail')">
+        <input type="checkbox" onclick="event.stopPropagation()" onchange="toggleDiagFlag('dDetail')">
+        <div class="ctext"><div class="t">상세설명에 소재·사이즈·원산지·AS 정보가 충분하다</div></div>
+      </div>
+      <div class="check-row" id="dShippingRow" onclick="toggleDiagFlag('dShipping')">
+        <input type="checkbox" onclick="event.stopPropagation()" onchange="toggleDiagFlag('dShipping')">
+        <div class="ctext"><div class="t">무료배송/빠른배송 등 노출 가점 조건을 충족한다</div></div>
+      </div>
+      <div class="check-row" id="dSellerRow" onclick="toggleDiagFlag('dSeller')">
+        <input type="checkbox" onclick="event.stopPropagation()" onchange="toggleDiagFlag('dSeller')">
+        <div class="ctext"><div class="t">문의 응답이 빠르고 클레임 처리가 양호하다</div></div>
+      </div>
+      <button class="btn-primary" style="margin-top:14px" onclick="runDiagnosis()">🩺 진단하기</button>
+
+      <div id="diagResult" style="display:none">
+        <div class="diag-summary">
+          <div class="box"><div class="num" id="diagFitScore">0</div><div class="lbl">적합도+신뢰도</div></div>
+          <div class="box"><div class="num" id="diagGrade">-</div><div class="lbl">종합 판정</div></div>
+        </div>
+        <div id="diagItems"></div>
+      </div>
+
+      <button class="btn-secondary" style="width:100%;margin-top:12px" onclick="saveSeoCheck()">이 진단 결과 저장하기</button>
     </div>
 
     <div class="card">
@@ -653,44 +700,13 @@ function openNaverCheck() {
   }, 400);
 }
 
-const SEO_CHECKLIST = [
-  { key: 'title_keyword', weight: 15, t: '상품명에 브랜드+카테고리+핵심키워드 포함', d: '예: "몽클레르 여성 숏패딩 후드" 처럼 검색될 만한 조합인가' },
-  { key: 'title_length',  weight: 10, t: '상품명 길이·반복 적절',              d: '25~50자 권장, 같은 키워드 반복 도배 없음' },
-  { key: 'tags_full',     weight: 10, t: '검색 태그 10개 모두 등록',           d: '스마트스토어 태그 입력란을 다 채웠는가' },
-  { key: 'category_match',weight: 10, t: '카테고리 정확히 일치',              d: '상위/하위 카테고리 오매칭 없음' },
-  { key: 'images_enough', weight: 10, t: '이미지 5장 이상, 고화질',           d: '대표+추가 이미지, 1000x1000px 이상' },
-  { key: 'detail_content',weight: 10, t: '상세설명 충실',                    d: '소재/사이즈/원산지/AS 등 신뢰 정보 포함' },
-  { key: 'price_competitive', weight: 15, t: '가격 경쟁력 확보',             d: '동일상품 최저가 대비 ±10% 이내' },
-  { key: 'shipping_condition', weight: 5, t: '배송 조건 노출 가점',          d: '무료배송/빠른배송 등 조건 충족' },
-  { key: 'review_count',  weight: 10, t: '리뷰/평점 확보',                   d: '초기 리뷰 이벤트 등으로 후기 쌓기' },
-  { key: 'seller_index',  weight: 5,  t: '판매자 지수 관리',                 d: '문의 응답속도, 클레임 처리 등' },
-];
+let diagFlags = { dCategory: false, dDetail: false, dShipping: false, dSeller: false };
+let lastDiagnosis = null;
 
-let seoCheckedState = {};
-
-function renderSeoChecklist() {
-  const el = document.getElementById('seoChecklist');
-  el.innerHTML = SEO_CHECKLIST.map(c => `
-    <label class="check-row ${seoCheckedState[c.key] ? 'checked' : ''}" id="seo-row-${c.key}">
-      <input type="checkbox" ${seoCheckedState[c.key] ? 'checked' : ''} onchange="toggleSeoCheck('${c.key}')">
-      <div class="ctext">
-        <div class="t">${c.t}</div>
-        <div class="d">${c.d}</div>
-      </div>
-      <div class="weight">${c.weight}점</div>
-    </label>
-  `).join('');
-  updateSeoScore();
-}
-
-function toggleSeoCheck(key) {
-  seoCheckedState[key] = !seoCheckedState[key];
-  document.getElementById('seo-row-' + key).classList.toggle('checked', seoCheckedState[key]);
-  updateSeoScore();
-}
-
-function computeSeoScore() {
-  return SEO_CHECKLIST.reduce((sum, c) => sum + (seoCheckedState[c.key] ? c.weight : 0), 0);
+function toggleDiagFlag(key) {
+  diagFlags[key] = !diagFlags[key];
+  const rowId = { dCategory: 'dCategoryRow', dDetail: 'dDetailRow', dShipping: 'dShippingRow', dSeller: 'dSellerRow' }[key];
+  document.getElementById(rowId).classList.toggle('checked', diagFlags[key]);
 }
 
 function seoGradeOf(score) {
@@ -699,38 +715,114 @@ function seoGradeOf(score) {
   return { label: '재작업 권장', cls: 'grade-reject' };
 }
 
-function updateSeoScore() {
-  const score = computeSeoScore();
+function diagIcon(cls) {
+  return { pass: '✅', warn: '⚠️', fail: '❌', info: 'ℹ️' }[cls];
+}
+
+function runDiagnosis() {
+  const title = document.getElementById('dTitle').value.trim();
+  const tags = document.getElementById('dTags').value.split(',').map(t => t.trim()).filter(Boolean);
+  const images = parseInt(document.getElementById('dImages').value) || 0;
+  const price = parseFloat(document.getElementById('dPrice').value) || 0;
+  const lowest = parseFloat(document.getElementById('dLowest').value) || 0;
+  const reviews = parseInt(document.getElementById('dReviews').value) || 0;
+  const days = parseInt(document.getElementById('dDays').value) || 0;
+
+  if (!title) { alert('상품명을 입력해주세요.'); return; }
+
+  const items = [];
+
+  // 상품명 길이
+  const len = title.length;
+  if (len < 15) items.push({ weight: 10, cls: 'warn', title: '상품명 길이', tip: `${len}자로 짧아요. 브랜드+카테고리+색상/소재 등 핵심 키워드를 더 넣어 15~50자를 권장해요.` });
+  else if (len > 50) items.push({ weight: 10, cls: 'warn', title: '상품명 길이', tip: `${len}자로 길어요. 핵심 키워드 위주로 정리하는 게 좋아요 (50자 이내 권장).` });
+  else items.push({ weight: 10, cls: 'pass', title: '상품명 길이', tip: `${len}자로 적절해요.` });
+
+  // 상품명 반복/구성
+  const words = title.split(/\s+/).filter(Boolean);
+  const freq = {};
+  words.forEach(w => { if (w.length >= 2) freq[w] = (freq[w] || 0) + 1; });
+  const repeated = Object.entries(freq).find(([, c]) => c >= 3);
+  if (repeated) {
+    items.push({ weight: 10, cls: 'fail', title: '키워드 반복', tip: `"${repeated[0]}"이(가) ${repeated[1]}번 반복돼요. 키워드 도배는 검색품질 저하(어뷰징)로 불이익을 받을 수 있어요.` });
+  } else if (new Set(words).size < 3) {
+    items.push({ weight: 10, cls: 'warn', title: '상품명 구성', tip: '구성이 단조로워요. 브랜드/카테고리/색상·소재 등을 조합해보세요.' });
+  } else {
+    items.push({ weight: 10, cls: 'pass', title: '상품명 구성', tip: '여러 요소가 조합된 상품명이에요.' });
+  }
+
+  // 태그
+  if (tags.length === 0) items.push({ weight: 10, cls: 'fail', title: '검색 태그', tip: '태그가 없어요. 10개를 모두 채우면 노출 기회가 늘어나요.' });
+  else if (tags.length < 10) items.push({ weight: 10, cls: 'warn', title: '검색 태그', tip: `${tags.length}개만 등록했어요. 10개를 다 채워보세요.` });
+  else items.push({ weight: 10, cls: 'pass', title: '검색 태그', tip: '10개를 모두 활용하고 있어요.' });
+
+  // 이미지
+  if (images === 0) items.push({ weight: 10, cls: 'info', title: '이미지 개수', tip: '이미지 개수를 입력하면 진단해드려요.', skip: true });
+  else if (images < 5) items.push({ weight: 10, cls: 'warn', title: '이미지 개수', tip: `${images}장이에요. 대표+연출컷+상세컷 등 5장 이상을 권장해요.` });
+  else items.push({ weight: 10, cls: 'pass', title: '이미지 개수', tip: `${images}장으로 충분해요.` });
+
+  // 가격 경쟁력
+  if (price === 0 || lowest === 0) {
+    items.push({ weight: 15, cls: 'info', title: '가격 경쟁력', tip: '판매가와 동일상품 최저가를 모두 입력하면 계산해드려요. 최저가는 위 "빠른 순위/가격 확인"으로 검색해서 확인하세요.', skip: true });
+  } else {
+    const diffPct = (price - lowest) / lowest * 100;
+    if (diffPct > 15) items.push({ weight: 15, cls: 'fail', title: '가격 경쟁력', tip: `최저가보다 ${diffPct.toFixed(0)}% 비싸요. 가격 경쟁에서 밀릴 가능성이 높아요.` });
+    else if (diffPct > 5) items.push({ weight: 15, cls: 'warn', title: '가격 경쟁력', tip: `최저가보다 ${diffPct.toFixed(0)}% 비싸요. 조정을 고려해보세요.` });
+    else if (diffPct < 0) items.push({ weight: 15, cls: 'pass', title: '가격 경쟁력', tip: `최저가보다 ${Math.abs(diffPct).toFixed(0)}% 저렴해요. 가격 경쟁력이 좋아요.` });
+    else items.push({ weight: 15, cls: 'pass', title: '가격 경쟁력', tip: '최저가와 비슷한 수준이에요.' });
+  }
+
+  // 체크박스 항목
+  items.push({ weight: 10, cls: diagFlags.dCategory ? 'pass' : 'warn', title: '카테고리 일치', tip: diagFlags.dCategory ? '카테고리가 정확해요.' : '카테고리가 정확한지 다시 확인해보세요. 오매칭되면 노출 자체가 안 될 수 있어요.' });
+  items.push({ weight: 10, cls: diagFlags.dDetail ? 'pass' : 'warn', title: '상세설명', tip: diagFlags.dDetail ? '상세설명이 충실해요.' : '소재·사이즈·원산지·AS 정보를 상세설명에 추가해보세요.' });
+  items.push({ weight: 5, cls: diagFlags.dShipping ? 'pass' : 'warn', title: '배송 조건', tip: diagFlags.dShipping ? '배송 조건이 노출에 유리해요.' : '무료배송/빠른배송 등 조건을 검토해보세요.' });
+  items.push({ weight: 5, cls: diagFlags.dSeller ? 'pass' : 'warn', title: '판매자 지수', tip: diagFlags.dSeller ? '판매자 지수 관리가 양호해요.' : '문의 응답 속도와 클레임 처리를 신경써주세요.' });
+
+  // 인기도 참고 (점수 미포함, 정보성)
+  let popTip;
+  if (reviews < 5 && days < 30) popTip = { cls: 'info', title: '인기도 (참고)', tip: `등록한 지 ${days}일이라 리뷰가 적은 건 정상이에요. 리뷰 이벤트/체험단으로 초반 리뷰를 빠르게 쌓는 게 랭킹에 가장 효과적이에요.` };
+  else if (reviews < 5 && days >= 30) popTip = { cls: 'warn', title: '인기도 (참고)', tip: `등록 ${days}일차인데 리뷰가 ${reviews}개뿐이에요. 노출·전환이 잘 안 되고 있을 수 있어요. 쇼핑검색광고로 초기 트래픽을 만들어보는 걸 추천해요.` };
+  else if (reviews >= 20) popTip = { cls: 'pass', title: '인기도 (참고)', tip: `리뷰 ${reviews}개로 인기도 측면에서 양호해요.` };
+  else popTip = { cls: 'info', title: '인기도 (참고)', tip: `리뷰 ${reviews}개, 등록 ${days}일차예요. 꾸준히 쌓이는 중이니 계속 관리해주세요.` };
+
+  let earned = 0, total = 0;
+  items.forEach(it => { if (!it.skip) { total += it.weight; if (it.cls === 'pass') earned += it.weight; else if (it.cls === 'warn') earned += it.weight * 0.5; } });
+  const score = total > 0 ? Math.round(earned / total * 100) : 0;
   const g = seoGradeOf(score);
-  document.getElementById('seoScoreNum').textContent = score;
-  const gradeEl = document.getElementById('seoScoreGrade');
-  gradeEl.textContent = g.label;
-  gradeEl.className = 'grade ' + g.cls;
+
+  lastDiagnosis = { title, score, gradeLabel: g.label, items, popTip };
+
+  document.getElementById('diagResult').style.display = 'block';
+  document.getElementById('diagFitScore').textContent = score;
+  document.getElementById('diagGrade').textContent = g.label;
+  document.getElementById('diagItems').innerHTML = items.concat([popTip]).map(it => `
+    <div class="diag-item ${it.cls}">
+      <div class="diag-icon">${diagIcon(it.cls)}</div>
+      <div class="diag-body">
+        <div class="diag-title">${escapeHTML(it.title)}</div>
+        <div class="diag-tip">${escapeHTML(it.tip)}</div>
+      </div>
+    </div>
+  `).join('');
+  document.getElementById('diagResult').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 let seoRecords = load(LS_SEO, []);
 
 function saveSeoCheck() {
+  if (!lastDiagnosis) { alert('먼저 "진단하기"를 눌러 결과를 확인해주세요.'); return; }
   const kw = document.getElementById('pKeyword').value.trim();
-  if (!kw) { alert('핵심 키워드를 입력해주세요.'); return; }
-  const score = computeSeoScore();
-  const g = seoGradeOf(score);
   seoRecords.unshift({
     id: Date.now(),
     url: document.getElementById('pUrl').value.trim(),
-    keyword: kw,
-    score, gradeLabel: g.label,
-    checked: Object.keys(seoCheckedState).filter(k => seoCheckedState[k]),
+    keyword: kw || lastDiagnosis.title,
+    score: lastDiagnosis.score,
+    gradeLabel: lastDiagnosis.gradeLabel,
     date: new Date().toISOString().slice(0, 10),
   });
   save(LS_SEO, seoRecords);
-
-  document.getElementById('pUrl').value = '';
-  document.getElementById('pKeyword').value = '';
-  seoCheckedState = {};
-  renderSeoChecklist();
   renderSeoRecords();
-  alert(`저장 완료 — ${kw} (${score}점, ${g.label})`);
+  alert(`저장 완료 — ${kw || lastDiagnosis.title} (${lastDiagnosis.score}점, ${lastDiagnosis.gradeLabel})`);
 }
 
 function renderSeoRecords() {
@@ -783,7 +875,6 @@ renderChannels();
 renderHistory();
 renderChecklist();
 renderVendorRecords();
-renderSeoChecklist();
 renderSeoRecords();
 </script>
 </body>
