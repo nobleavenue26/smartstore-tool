@@ -98,6 +98,7 @@ textarea { resize: vertical; min-height: 60px; }
   <div class="tabs">
     <div class="tab active" id="tab1-btn" onclick="showTab(1)">① 상품 검색</div>
     <div class="tab" id="tab2-btn" onclick="showTab(2)">② 거래처 인증</div>
+    <div class="tab" id="tab3-btn" onclick="showTab(3)">③ 상품 최적화</div>
   </div>
 
   <!-- TAB 1: 상품 검색 -->
@@ -196,6 +197,37 @@ textarea { resize: vertical; min-height: 60px; }
     </div>
   </div>
 
+  <!-- TAB 3: 상품 최적화 -->
+  <div id="tab3" style="display:none">
+    <div class="info-box">
+      상품이 실제로 검색 몇 페이지에 뜨는지 자동으로 추적하는 건 네이버 공식 API + 서버가 필요해서 이 툴로는 못 만들어요 (필요하시면 <b>아이템스카우트/셀러라이프</b> 같은 전문 툴 사용을 추천드려요). 대신 핵심 키워드로 검색 결과를 바로 열어 눈으로 확인하는 것과, 네이버 SEO 기본기를 스스로 점검하는 체크리스트를 준비했어요.
+    </div>
+
+    <div class="card">
+      <div class="card-title">빠른 순위/가격 확인</div>
+      <div class="field"><label>상품 URL (참고용, 선택)</label><input type="text" id="pUrl" placeholder="https://m.smartstore.naver.com/..."></div>
+      <div class="field"><label>핵심 키워드</label><input type="text" id="pKeyword" placeholder="예: 몽클레르 숏패딩 여성"></div>
+      <button class="btn-primary" onclick="openNaverCheck()">🔍 네이버에서 검색 결과 확인</button>
+      <div style="text-align:center;font-size:11px;color:#AAA;margin-top:8px">검색 결과가 열리면 직접 스크롤해서 내 상품이 몇 페이지쯤 있는지, 다른 판매자 가격은 어떤지 확인하세요.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">상품 최적화 체크리스트</div>
+      <div class="checklist" id="seoChecklist"></div>
+      <div class="score-box">
+        <div class="num" id="seoScoreNum">0</div>
+        <div class="grade" id="seoScoreGrade">점수 산출 전</div>
+      </div>
+      <button class="btn-primary" onclick="saveSeoCheck()">저장하기</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">점검 이력 <span class="hint" id="seoCount"></span></div>
+      <div id="seoRecords"></div>
+      <button class="btn-secondary" onclick="exportSeoCSV()">CSV로 내보내기</button>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -216,10 +248,10 @@ function save(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
 // TAB 전환
 // ============================================================
 function showTab(n) {
-  document.getElementById('tab1').style.display = n === 1 ? 'block' : 'none';
-  document.getElementById('tab2').style.display = n === 2 ? 'block' : 'none';
-  document.getElementById('tab1-btn').className = 'tab' + (n === 1 ? ' active' : '');
-  document.getElementById('tab2-btn').className = 'tab' + (n === 2 ? ' active' : '');
+  [1, 2, 3].forEach(i => {
+    document.getElementById('tab' + i).style.display = i === n ? 'block' : 'none';
+    document.getElementById('tab' + i + '-btn').className = 'tab' + (i === n ? ' active' : '');
+  });
 }
 
 // ============================================================
@@ -607,12 +639,152 @@ function exportCSV() {
 }
 
 // ============================================================
+// TAB 3: 상품 최적화
+// ============================================================
+const LS_SEO = 'pst_seo_checks_v1';
+
+function openNaverCheck() {
+  const kw = document.getElementById('pKeyword').value.trim();
+  if (!kw) { alert('핵심 키워드를 입력해주세요.'); return; }
+  const enc = encodeURIComponent(kw);
+  window.open(`https://search.shopping.naver.com/search/all?query=${enc}`, '_blank');
+  setTimeout(() => {
+    window.open(`https://search.naver.com/search.naver?query=${enc}`, '_blank');
+  }, 400);
+}
+
+const SEO_CHECKLIST = [
+  { key: 'title_keyword', weight: 15, t: '상품명에 브랜드+카테고리+핵심키워드 포함', d: '예: "몽클레르 여성 숏패딩 후드" 처럼 검색될 만한 조합인가' },
+  { key: 'title_length',  weight: 10, t: '상품명 길이·반복 적절',              d: '25~50자 권장, 같은 키워드 반복 도배 없음' },
+  { key: 'tags_full',     weight: 10, t: '검색 태그 10개 모두 등록',           d: '스마트스토어 태그 입력란을 다 채웠는가' },
+  { key: 'category_match',weight: 10, t: '카테고리 정확히 일치',              d: '상위/하위 카테고리 오매칭 없음' },
+  { key: 'images_enough', weight: 10, t: '이미지 5장 이상, 고화질',           d: '대표+추가 이미지, 1000x1000px 이상' },
+  { key: 'detail_content',weight: 10, t: '상세설명 충실',                    d: '소재/사이즈/원산지/AS 등 신뢰 정보 포함' },
+  { key: 'price_competitive', weight: 15, t: '가격 경쟁력 확보',             d: '동일상품 최저가 대비 ±10% 이내' },
+  { key: 'shipping_condition', weight: 5, t: '배송 조건 노출 가점',          d: '무료배송/빠른배송 등 조건 충족' },
+  { key: 'review_count',  weight: 10, t: '리뷰/평점 확보',                   d: '초기 리뷰 이벤트 등으로 후기 쌓기' },
+  { key: 'seller_index',  weight: 5,  t: '판매자 지수 관리',                 d: '문의 응답속도, 클레임 처리 등' },
+];
+
+let seoCheckedState = {};
+
+function renderSeoChecklist() {
+  const el = document.getElementById('seoChecklist');
+  el.innerHTML = SEO_CHECKLIST.map(c => `
+    <label class="check-row ${seoCheckedState[c.key] ? 'checked' : ''}" id="seo-row-${c.key}">
+      <input type="checkbox" ${seoCheckedState[c.key] ? 'checked' : ''} onchange="toggleSeoCheck('${c.key}')">
+      <div class="ctext">
+        <div class="t">${c.t}</div>
+        <div class="d">${c.d}</div>
+      </div>
+      <div class="weight">${c.weight}점</div>
+    </label>
+  `).join('');
+  updateSeoScore();
+}
+
+function toggleSeoCheck(key) {
+  seoCheckedState[key] = !seoCheckedState[key];
+  document.getElementById('seo-row-' + key).classList.toggle('checked', seoCheckedState[key]);
+  updateSeoScore();
+}
+
+function computeSeoScore() {
+  return SEO_CHECKLIST.reduce((sum, c) => sum + (seoCheckedState[c.key] ? c.weight : 0), 0);
+}
+
+function seoGradeOf(score) {
+  if (score >= 80) return { label: '최적화 잘됨', cls: 'grade-approve' };
+  if (score >= 60) return { label: '개선 필요', cls: 'grade-hold' };
+  return { label: '재작업 권장', cls: 'grade-reject' };
+}
+
+function updateSeoScore() {
+  const score = computeSeoScore();
+  const g = seoGradeOf(score);
+  document.getElementById('seoScoreNum').textContent = score;
+  const gradeEl = document.getElementById('seoScoreGrade');
+  gradeEl.textContent = g.label;
+  gradeEl.className = 'grade ' + g.cls;
+}
+
+let seoRecords = load(LS_SEO, []);
+
+function saveSeoCheck() {
+  const kw = document.getElementById('pKeyword').value.trim();
+  if (!kw) { alert('핵심 키워드를 입력해주세요.'); return; }
+  const score = computeSeoScore();
+  const g = seoGradeOf(score);
+  seoRecords.unshift({
+    id: Date.now(),
+    url: document.getElementById('pUrl').value.trim(),
+    keyword: kw,
+    score, gradeLabel: g.label,
+    checked: Object.keys(seoCheckedState).filter(k => seoCheckedState[k]),
+    date: new Date().toISOString().slice(0, 10),
+  });
+  save(LS_SEO, seoRecords);
+
+  document.getElementById('pUrl').value = '';
+  document.getElementById('pKeyword').value = '';
+  seoCheckedState = {};
+  renderSeoChecklist();
+  renderSeoRecords();
+  alert(`저장 완료 — ${kw} (${score}점, ${g.label})`);
+}
+
+function renderSeoRecords() {
+  document.getElementById('seoCount').textContent = `총 ${seoRecords.length}건`;
+  const gradeClass = { '최적화 잘됨': 'grade-approve', '개선 필요': 'grade-hold', '재작업 권장': 'grade-reject' };
+  document.getElementById('seoRecords').innerHTML = seoRecords.map(r => `
+    <div class="vendor-card">
+      <div class="top">
+        <div>
+          <div class="vname">${escapeHTML(r.keyword)}</div>
+          <div class="vmeta">${escapeHTML(r.url || '-')} · ${r.date}</div>
+        </div>
+        <div>
+          <span class="badge ${gradeClass[r.gradeLabel]}">${r.score}점 · ${escapeHTML(r.gradeLabel)}</span>
+        </div>
+      </div>
+      <div style="margin-top:10px;text-align:right">
+        <span class="btn-danger" onclick="deleteSeoRecord(${r.id})">삭제</span>
+      </div>
+    </div>
+  `).join('') || `<div style="text-align:center;color:#BBB;font-size:12px;padding:20px 0">기록이 없습니다</div>`;
+}
+
+function deleteSeoRecord(id) {
+  if (!confirm('이 기록을 삭제할까요?')) return;
+  seoRecords = seoRecords.filter(r => r.id !== id);
+  save(LS_SEO, seoRecords);
+  renderSeoRecords();
+}
+
+function exportSeoCSV() {
+  if (seoRecords.length === 0) { alert('내보낼 기록이 없습니다.'); return; }
+  const headers = ['키워드','URL','점수','등급','점검일'];
+  const csvEsc = (s) => `"${String(s == null ? '' : s).replace(/"/g,'""')}"`;
+  const rows = seoRecords.map(r => [r.keyword, r.url, r.score, r.gradeLabel, r.date].map(csvEsc).join(','));
+  const csv = '﻿' + [headers.map(csvEsc).join(','), ...rows].join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `상품최적화_점검기록_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ============================================================
 // 초기화
 // ============================================================
 renderChannels();
 renderHistory();
 renderChecklist();
 renderVendorRecords();
+renderSeoChecklist();
+renderSeoRecords();
 </script>
 </body>
 </html>
