@@ -18,10 +18,15 @@ body { font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; backgroun
 .card { background: #fff; border-radius: 16px; padding: 20px; margin-bottom: 14px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
 .card-title { font-size: 11px; font-weight: 700; color: #AAA; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; }
 .card-title .hint { text-transform: none; font-size: 10px; color: #C9A96E; letter-spacing: 0; font-weight: 500; }
-input[type=text], input[type=url], textarea, select {
+input[type=text], input[type=url], input[type=number], textarea, select {
   width: 100%; border: 1.5px solid #E0D9D0; border-radius: 8px; padding: 10px 12px;
-  font-size: 14px; outline: none; background: #FAFAFA; font-family: inherit;
+  font-size: 16px; outline: none; background: #FAFAFA; font-family: inherit;
 }
+input:focus, textarea:focus { border-color: #C9A96E; background: #fff; }
+@media (max-width: 420px) { .grid2 { grid-template-columns: 1fr; gap: 0; } }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #1A1A1A; color: #fff; font-size: 13px; padding: 10px 18px; border-radius: 20px; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 99; max-width: 90%; text-align: center; }
+.toast.show { opacity: 1; }
+.link-card.visited { opacity: .55; }
 textarea { resize: vertical; min-height: 60px; }
 .field { margin-bottom: 10px; }
 .field label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; }
@@ -130,7 +135,7 @@ textarea { resize: vertical; min-height: 60px; }
       </div>
       <button class="btn-primary" onclick="generateLinks()">🔗 검색 링크 만들기</button>
       <div class="result-list" id="linkResults"></div>
-      <div style="text-align:center;font-size:11px;color:#AAA;margin-top:10px">위 버튼은 링크만 만들어줘요 — 원하는 것만 하나씩 눌러서 여세요 (한번에 하나씩 열리니 폰에서도 안 버벅입니다).</div>
+      <div style="text-align:center;font-size:11px;color:#AAA;margin-top:10px">Enter 키로도 검색돼요. 검색어는 자동으로 복사되니 로그인 사이트(홈 바로가기)에선 붙여넣기만 하세요. 이미 연 링크는 흐리게 표시돼요.</div>
       <button class="btn-secondary" style="width:100%;margin-top:10px" onclick="openAll()">전체 한번에 열기 (느릴 수 있음)</button>
       <div class="history" id="historyList"></div>
     </div>
@@ -149,7 +154,7 @@ textarea { resize: vertical; min-height: 60px; }
         <div class="current" id="batchCurrent"></div>
         <div class="nav-row">
           <button class="btn-secondary" onclick="batchPrev()">← 이전</button>
-          <button class="btn-primary" style="padding:9px" onclick="batchGenerate()">🔗 이 상품 링크 만들기</button>
+          <button class="btn-primary" style="padding:9px" onclick="batchGenerate()">🔗 링크 다시 만들기</button>
           <button class="btn-secondary" onclick="batchNext()">다음 →</button>
         </div>
       </div>
@@ -239,22 +244,22 @@ textarea { resize: vertical; min-height: 60px; }
         <div class="field"><label>현재 리뷰 수</label><input type="number" id="dReviews" placeholder="예: 3"></div>
         <div class="field"><label>등록 후 경과일</label><input type="number" id="dDays" placeholder="예: 14"></div>
       </div>
-      <div class="check-row" id="dCategoryRow" onclick="toggleDiagFlag('dCategory')">
-        <input type="checkbox" onclick="event.stopPropagation()" onchange="toggleDiagFlag('dCategory')">
+      <label class="check-row" id="dCategoryRow">
+        <input type="checkbox" onchange="toggleDiagFlag('dCategory', this.checked)">
         <div class="ctext"><div class="t">카테고리가 상품과 정확히 일치한다</div></div>
-      </div>
-      <div class="check-row" id="dDetailRow" onclick="toggleDiagFlag('dDetail')">
-        <input type="checkbox" onclick="event.stopPropagation()" onchange="toggleDiagFlag('dDetail')">
+      </label>
+      <label class="check-row" id="dDetailRow">
+        <input type="checkbox" onchange="toggleDiagFlag('dDetail', this.checked)">
         <div class="ctext"><div class="t">상세설명에 소재·사이즈·원산지·AS 정보가 충분하다</div></div>
-      </div>
-      <div class="check-row" id="dShippingRow" onclick="toggleDiagFlag('dShipping')">
-        <input type="checkbox" onclick="event.stopPropagation()" onchange="toggleDiagFlag('dShipping')">
+      </label>
+      <label class="check-row" id="dShippingRow">
+        <input type="checkbox" onchange="toggleDiagFlag('dShipping', this.checked)">
         <div class="ctext"><div class="t">무료배송/빠른배송 등 노출 가점 조건을 충족한다</div></div>
-      </div>
-      <div class="check-row" id="dSellerRow" onclick="toggleDiagFlag('dSeller')">
-        <input type="checkbox" onclick="event.stopPropagation()" onchange="toggleDiagFlag('dSeller')">
+      </label>
+      <label class="check-row" id="dSellerRow">
+        <input type="checkbox" onchange="toggleDiagFlag('dSeller', this.checked)">
         <div class="ctext"><div class="t">문의 응답이 빠르고 클레임 처리가 양호하다</div></div>
-      </div>
+      </label>
       <button class="btn-primary" style="margin-top:14px" onclick="runDiagnosis()">🩺 진단하기</button>
 
       <div id="diagResult" style="display:none">
@@ -275,7 +280,16 @@ textarea { resize: vertical; min-height: 60px; }
     </div>
   </div>
 
+  <div class="card">
+    <div class="card-title">데이터 백업 <span class="hint">채널·기록은 이 브라우저에만 저장돼요</span></div>
+    <div class="grid2">
+      <button class="btn-secondary" onclick="backupAll()">⬇ 백업 파일 받기</button>
+      <label class="btn-secondary" style="text-align:center">⬆ 백업 복원<input type="file" accept=".json" style="display:none" onchange="restoreAll(this)"></label>
+    </div>
+  </div>
+
 </div>
+<div class="toast" id="toast"></div>
 
 <script>
 // ============================================================
@@ -289,7 +303,19 @@ function load(key, fallback) {
   try { const v = JSON.parse(localStorage.getItem(key)); return v || fallback; }
   catch(e) { return fallback; }
 }
-function save(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
+function save(key, val) {
+  try { localStorage.setItem(key, JSON.stringify(val)); }
+  catch(e) { toast('⚠️ 저장 실패 — 브라우저 저장공간을 확인해주세요'); }
+}
+
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+}
 
 // ============================================================
 // TAB 전환
@@ -299,6 +325,7 @@ function showTab(n) {
     document.getElementById('tab' + i).style.display = i === n ? 'block' : 'none';
     document.getElementById('tab' + i + '-btn').className = 'tab' + (i === n ? ' active' : '');
   });
+  try { localStorage.setItem('pst_tab', n); } catch(e) {}
 }
 
 // ============================================================
@@ -339,7 +366,9 @@ DEFAULT_CHANNELS.forEach(dc => {
 });
 if (channelsUpdated) save(LS_CHANNELS, channels);
 
-let history = load(LS_HISTORY, []);
+// 검색 기록: {brand, keyword} 형태로 저장 (예전 문자열 기록도 그대로 읽음)
+let searchHistory = load(LS_HISTORY, []).map(h => typeof h === 'string' ? { brand: '', keyword: h } : h);
+const histLabel = h => [h.brand, h.keyword].filter(Boolean).join(' ');
 
 function renderChannels() {
   const list = document.getElementById('channelList');
@@ -400,23 +429,45 @@ function currentQuery() {
 
 function renderHistory() {
   const el = document.getElementById('historyList');
-  el.innerHTML = history.map(h => `<span onclick="reuseHistory('${escapeHTML(h).replace(/'/g,"\\'")}')">${escapeHTML(h)}</span>`).join('');
+  el.innerHTML = searchHistory.map((h, i) => `<span onclick="reuseHistory(${i})">${escapeHTML(histLabel(h))}</span>`).join('');
 }
 
-function reuseHistory(q) {
-  const parts = q.split(' ');
-  document.getElementById('qBrand').value = parts[0] || '';
-  document.getElementById('qKeyword').value = parts.slice(1).join(' ');
+// 브랜드/키워드를 따로 기억하므로 "SAINT LAURENT"처럼 띄어쓰기 있는 브랜드도 정확히 복원됨
+function reuseHistory(i) {
+  const h = searchHistory[i];
+  if (!h) return;
+  document.getElementById('qBrand').value = h.brand || '';
+  document.getElementById('qKeyword').value = h.keyword || '';
+  generateLinks();
 }
 
-function pushHistory(q) {
-  history = [q, ...history.filter(h => h !== q)].slice(0, 15);
-  save(LS_HISTORY, history);
+function pushHistory() {
+  const entry = {
+    brand: document.getElementById('qBrand').value.trim(),
+    keyword: document.getElementById('qKeyword').value.trim(),
+  };
+  const label = histLabel(entry).toLowerCase();
+  searchHistory = [entry, ...searchHistory.filter(h => histLabel(h).toLowerCase() !== label)].slice(0, 15);
+  save(LS_HISTORY, searchHistory);
   renderHistory();
 }
 
 function searchTargets() {
   return channels.filter(c => c.enabled && c.tpl);
+}
+
+function buildURL(tpl, enc) { return tpl.split('{q}').join(enc); }
+
+// 로그인 필요/홈 바로가기 채널은 검색어를 클립보드에 복사 → 열린 사이트에서 붙여넣기만 하면 됨
+function copyQuery(q, silent) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(q).then(() => { if (!silent) toast(`📋 "${q}" 복사됨 — 사이트에서 붙여넣기 하세요`); }).catch(() => {});
+  }
+}
+
+function onLinkClick(el, isAuto) {
+  el.querySelector('.link-card').classList.add('visited');
+  if (!isAuto) copyQuery(currentQuery());
 }
 
 function domainOf(url) {
@@ -436,9 +487,9 @@ function generateLinks() {
     return;
   }
   container.innerHTML = targets.map(c => {
-    const url = c.tpl.replace('{q}', enc);
+    const url = buildURL(c.tpl, enc);
     const isAuto = c.tpl.includes('{q}');
-    return `<a href="${escapeHTML(url)}" target="_blank" rel="noopener">
+    return `<a href="${escapeHTML(url)}" target="_blank" rel="noopener" onclick="onLinkClick(this, ${isAuto})">
       <div class="link-card">
         <div class="lc-info">
           <div class="lc-name">${escapeHTML(c.name)}</div>
@@ -449,7 +500,8 @@ function generateLinks() {
       </div>
     </a>`;
   }).join('');
-  pushHistory(q);
+  pushHistory();
+  copyQuery(q, true);
 }
 
 function openAll() {
@@ -460,10 +512,11 @@ function openAll() {
   if (targets.length === 0) { alert('열 수 있는 채널이 없습니다. 채널의 검색 URL을 먼저 등록해주세요.'); return; }
   targets.forEach((c, idx) => {
     setTimeout(() => {
-      window.open(c.tpl.replace('{q}', enc), '_blank');
+      window.open(buildURL(c.tpl, enc), '_blank');
     }, idx * 500);
   });
-  pushHistory(q);
+  pushHistory();
+  copyQuery(q, true);
 }
 
 // ============================================================
@@ -474,7 +527,10 @@ function splitCSVLine(line) {
   let cur = '', inQ = false;
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
-    if (c === '"') { inQ = !inQ; }
+    if (c === '"') {
+      if (inQ && line[i + 1] === '"') { cur += '"'; i++; }   // "" = 따옴표 문자
+      else inQ = !inQ;
+    }
     else if (c === ',' && !inQ) { result.push(cur); cur = ''; }
     else { cur += c; }
   }
@@ -485,9 +541,9 @@ function splitCSVLine(line) {
 function parseCSVRows(text) {
   const lines = text.split(/\r?\n/).filter(l => l.trim());
   if (lines.length === 0) return [];
-  const headers = splitCSVLine(lines[0]).map(h => h.trim().toLowerCase());
-  const brandIdx = headers.findIndex(h => ['브랜드', 'brand'].includes(h));
-  const kwIdx = headers.findIndex(h => ['모델명', '키워드', 'sku', 'keyword', 'model'].includes(h));
+  const headers = splitCSVLine(lines[0]).map(h => h.replace(/^\uFEFF/, '').trim().toLowerCase());
+  const brandIdx = headers.findIndex(h => /브랜드|brand/.test(h));
+  const kwIdx = headers.findIndex(h => /모델|키워드|sku|keyword|model|품번|상품명/.test(h));
   const hasHeaderMatch = brandIdx !== -1 || kwIdx !== -1;
 
   const dataLines = hasHeaderMatch ? lines.slice(1) : lines;
@@ -508,7 +564,11 @@ function handleCSV(input) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = (e) => {
-    batchRows = parseCSVRows(e.target.result);
+    // 엑셀에서 저장한 한글 CSV는 EUC-KR인 경우가 많아 UTF-8 실패 시 자동 전환
+    let text;
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(e.target.result); }
+    catch(err) { text = new TextDecoder('euc-kr').decode(e.target.result); }
+    batchRows = parseCSVRows(text);
     if (batchRows.length === 0) {
       alert('CSV에서 검색어를 찾지 못했어요. 형식을 확인해주세요.');
       return;
@@ -516,8 +576,9 @@ function handleCSV(input) {
     batchIndex = 0;
     document.getElementById('batchNav').style.display = 'block';
     renderBatch();
+    toast(`${batchRows.length}개 상품을 불러왔어요`);
   };
-  reader.readAsText(file, 'UTF-8');
+  reader.readAsArrayBuffer(file);
   input.value = '';
 }
 
@@ -532,13 +593,13 @@ function renderBatch() {
 function batchPrev() {
   if (batchRows.length === 0) return;
   batchIndex = (batchIndex - 1 + batchRows.length) % batchRows.length;
-  renderBatch();
+  batchGenerate();
 }
 
 function batchNext() {
   if (batchRows.length === 0) return;
   batchIndex = (batchIndex + 1) % batchRows.length;
-  renderBatch();
+  batchGenerate();
 }
 
 function batchGenerate() {
@@ -703,8 +764,8 @@ function openNaverCheck() {
 let diagFlags = { dCategory: false, dDetail: false, dShipping: false, dSeller: false };
 let lastDiagnosis = null;
 
-function toggleDiagFlag(key) {
-  diagFlags[key] = !diagFlags[key];
+function toggleDiagFlag(key, val) {
+  diagFlags[key] = val;
   const rowId = { dCategory: 'dCategoryRow', dDetail: 'dDetailRow', dShipping: 'dShippingRow', dSeller: 'dSellerRow' }[key];
   document.getElementById(rowId).classList.toggle('checked', diagFlags[key]);
 }
@@ -869,6 +930,48 @@ function exportSeoCSV() {
 }
 
 // ============================================================
+// 전체 데이터 백업 / 복원 (브라우저 데이터 삭제·기기 변경 대비)
+// ============================================================
+const BACKUP_KEYS = [LS_CHANNELS, LS_HISTORY, LS_VENDORS, LS_SEO];
+
+function backupAll() {
+  const data = { app: 'product-search', date: new Date().toISOString() };
+  BACKUP_KEYS.forEach(k => data[k] = load(k, null));
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `상품검색툴_백업_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function restoreAll(input) {
+  const file = input.files[0];
+  input.value = '';
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (data.app !== 'product-search') throw new Error();
+      if (!confirm('현재 데이터를 백업 파일 내용으로 바꿀까요?')) return;
+      BACKUP_KEYS.forEach(k => { if (data[k] != null) save(k, data[k]); });
+      location.reload();
+    } catch(err) { alert('올바른 백업 파일이 아니에요.'); }
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+// Enter 키로 바로 검색
+['qBrand', 'qKeyword'].forEach(id => document.getElementById(id).addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); generateLinks(); }
+}));
+document.getElementById('pKeyword').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); openNaverCheck(); }
+});
+
+// ============================================================
 // 초기화
 // ============================================================
 renderChannels();
@@ -876,6 +979,7 @@ renderHistory();
 renderChecklist();
 renderVendorRecords();
 renderSeoRecords();
+try { const t = +localStorage.getItem('pst_tab'); if (t >= 1 && t <= 3) showTab(t); } catch(e) {}
 </script>
 </body>
 </html>
